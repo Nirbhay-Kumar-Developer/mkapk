@@ -27,6 +27,7 @@ Before compiling or running `mkapk`, you need to ensure the required native buil
 * `clang`
 * `binutils`
 * `libzip`
+* `wget`
 
 ### One-Line Installation
 Run the following command inside Termux to install all dependencies at once:
