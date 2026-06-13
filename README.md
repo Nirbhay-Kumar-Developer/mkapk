@@ -33,3 +33,53 @@ Run the following command inside Termux to install all dependencies at once:
 
 ```bash
 apt update && apt install openjdk-21 ndk-multilib aapt2 clang binutils libzip openssl apksigner -y
+
+
+## Usage Instructions
+
+### Project Setup
+
+Initialise template directory structure in the current directory.
+
+```bash
+mkapk init
+
+### Build
+
+Start build using:
+
+```bash
+mkapk build
+
+Default build is debug.
+
+##### Build Flags
+
+-release: Do a release build
+
+-all: Force a full rebuild
+
+-ndk-all: Build apk for all supported architectures along with a universal apk
+
+-arch <architecture>: Build apk only for the specified architecture
+
+### Clean Up
+
+To clean up previous build artifacts, run:
+
+```bash
+mkapk clean
+
+Note: This will disable incremental build for the next build.
+
+
+### Language Plugin Management (experimental)
+
+To install a plugin, run:
+
+```bash
+mkapk install <path/to/plugin.pl>
+
+To uninstall a plugin, run:
+
+mkapk unistall <path/to/plugin.pl>
