@@ -36,6 +36,10 @@ Run the following command inside Termux to install all dependencies at once:
 apt update && apt install openjdk-21 ndk-multilib aapt2 clang binutils libzip openssl apksigner -y
 ```
 
+## Debian package download
+<a href="https://github.com/Nirbhay-Kumar-Developer/mkapk/releases/latest/download/mkapk-aarch64.deb">Download Latest Release</a>
+
+
 ---
 
 ## 🛠️ Usage Instructions
