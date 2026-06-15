@@ -1,0 +1,10 @@
+build/
+scala-plugin-workspace/
+test/bin/
+mkapk_public.pem
+mkapk.pem
+scala_compiler.pl
+to-do.txt
+bundle.sh
+bundle.cpp
+

@@ -1,0 +1,12 @@
+Package: mkapk
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: Nirbhay Kumar <dev.nirbhaykumar@gmail.com>
+Depends: openjdk-21, openssl, aapt2, apksigner, ndk-multilib, clang, binutils, libzip
+Description: Modular Android Build System designed for Termux
+ A lightweight, modular build system designed to compile Java, 
+ Kotlin, and C/C++ (NDK) projects directly on Android via Termux. 
+ Includes support for Compose, Java and resource obfuscation.
+ Supports language plugins (experimental).
