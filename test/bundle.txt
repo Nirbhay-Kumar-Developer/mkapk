@@ -1,0 +1,474 @@
+// Polyglot Hello BUNDLE GENERATED: Sat Jun 13 10:09:41 IST 2026
+
+
+/* ============================================================================ */
+/* FILE: src/C/core_logic.c */
+/* ============================================================================ */
+
+#include <string.h>
+
+const char* get_low_level_c_string() {
+    return "[C Core] Hello World from Native Components!";
+}/* FILE: AndroidManifest.xml */
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.polyglot"
+    android:versionCode="1"
+    android:versionName="1.0">
+    
+    <uses-sdk
+        android:minSdkVersion="30"
+        android:targetSdkVersion="34"/>
+
+    <application
+        android:label="Polyglot Hello"
+        android:hasCode="true"
+        android:debuggable="true">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>/* FILE: config.json */
+{
+    "PROJECT": {
+        "NAME": "PolyglotTest",
+        "MIN_SDK": "30",
+        "TARGET_SDK": "34",
+        "BUILD_TYPE": "debug",
+        "JAVA_VERSION": "17"
+    },
+    "PATHS": {
+        "SDK_ROOT": "~/android-sdk/Sdk",
+        "NDK_BIN": "~/android-sdk/Sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-android/bin",
+        "TERMUX_BIN": "/data/data/com.termux/files/usr/bin",
+        "KEYSTORE": "~/.android/debug.keystore",
+        "KEYSTORE_ALIAS": "androiddebugkey"
+    },
+    "STRUCTURE": {
+        "SRC_DIR": "src",
+        "RES_DIR": "res",
+        "MANIFEST": "AndroidManifest.xml",
+        "BIN_DIR": "bin"
+    },
+    "COMPILER_SETTINGS": {
+        "ZIP_ALIGNMENT": "4",
+        "JAVAC_FLAGS": [],
+        "NDK_FLAGS": ["-O3", "-fPIC"]
+    },
+    "NATIVE_TARGETS": [
+        {
+            "NAME": "native",
+            "SOURCES": [
+                "src/C/main_logic.c",
+                "src/C++/native_bridge.cpp"
+            ],
+            "EXTRA_FLAGS": ["-std=c++17"]
+        }
+    ]
+}
+
+/* ============================================================================ */
+/* FILE: src/C++/native_bridge.cpp */
+/* ============================================================================ */
+
+#include <jni.h>
+#include <string>
+
+// External linkage linking straight to our localized pure C engine component
+extern "C" {
+    const char* get_low_level_c_string();
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_polyglot_JavaBridge_stringFromNativeJNI(JNIEnv* env, jobject thiz) {
+    // Collect the execution tracking data out from our C processing engine
+    std::string core_c_message = get_low_level_c_string();
+    std::string response = "[C++] Unified Native Pipeline Layer -> " + core_c_message;
+    
+    return env->NewStringUTF(response.c_str());
+}/* FILE: AndroidManifest.xml */
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.polyglot"
+    android:versionCode="1"
+    android:versionName="1.0">
+    
+    <uses-sdk
+        android:minSdkVersion="30"
+        android:targetSdkVersion="34"/>
+
+    <application
+        android:label="Polyglot Hello"
+        android:hasCode="true"
+        android:debuggable="true">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>/* FILE: config.json */
+{
+    "PROJECT": {
+        "NAME": "PolyglotTest",
+        "MIN_SDK": "30",
+        "TARGET_SDK": "34",
+        "BUILD_TYPE": "debug",
+        "JAVA_VERSION": "17"
+    },
+    "PATHS": {
+        "SDK_ROOT": "~/android-sdk/Sdk",
+        "NDK_BIN": "~/android-sdk/Sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-android/bin",
+        "TERMUX_BIN": "/data/data/com.termux/files/usr/bin",
+        "KEYSTORE": "~/.android/debug.keystore",
+        "KEYSTORE_ALIAS": "androiddebugkey"
+    },
+    "STRUCTURE": {
+        "SRC_DIR": "src",
+        "RES_DIR": "res",
+        "MANIFEST": "AndroidManifest.xml",
+        "BIN_DIR": "bin"
+    },
+    "COMPILER_SETTINGS": {
+        "ZIP_ALIGNMENT": "4",
+        "JAVAC_FLAGS": [],
+        "NDK_FLAGS": ["-O3", "-fPIC"]
+    },
+    "NATIVE_TARGETS": [
+        {
+            "NAME": "native",
+            "SOURCES": [
+                "src/C/main_logic.c",
+                "src/C++/native_bridge.cpp"
+            ],
+            "EXTRA_FLAGS": ["-std=c++17"]
+        }
+    ]
+}
+
+/* ============================================================================ */
+/* FILE: src/com/example/polyglot/R.java */
+/* ============================================================================ */
+
+/* AUTO-GENERATED FILE. DO NOT MODIFY.
+ *
+ * This class was automatically generated by the
+ * aapt tool from the resource data it found. It
+ * should not be modified by hand.
+ */
+
+package com.example.polyglot;
+
+public final class R {
+  public static final class id {
+    public static final int display_view=0x7f010000;
+  }
+  public static final class layout {
+    public static final int activity_main=0x7f020000;
+  }
+}/* FILE: AndroidManifest.xml */
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.polyglot"
+    android:versionCode="1"
+    android:versionName="1.0">
+    
+    <uses-sdk
+        android:minSdkVersion="30"
+        android:targetSdkVersion="34"/>
+
+    <application
+        android:label="Polyglot Hello"
+        android:hasCode="true"
+        android:debuggable="true">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>/* FILE: config.json */
+{
+    "PROJECT": {
+        "NAME": "PolyglotTest",
+        "MIN_SDK": "30",
+        "TARGET_SDK": "34",
+        "BUILD_TYPE": "debug",
+        "JAVA_VERSION": "17"
+    },
+    "PATHS": {
+        "SDK_ROOT": "~/android-sdk/Sdk",
+        "NDK_BIN": "~/android-sdk/Sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-android/bin",
+        "TERMUX_BIN": "/data/data/com.termux/files/usr/bin",
+        "KEYSTORE": "~/.android/debug.keystore",
+        "KEYSTORE_ALIAS": "androiddebugkey"
+    },
+    "STRUCTURE": {
+        "SRC_DIR": "src",
+        "RES_DIR": "res",
+        "MANIFEST": "AndroidManifest.xml",
+        "BIN_DIR": "bin"
+    },
+    "COMPILER_SETTINGS": {
+        "ZIP_ALIGNMENT": "4",
+        "JAVAC_FLAGS": [],
+        "NDK_FLAGS": ["-O3", "-fPIC"]
+    },
+    "NATIVE_TARGETS": [
+        {
+            "NAME": "native",
+            "SOURCES": [
+                "src/C/main_logic.c",
+                "src/C++/native_bridge.cpp"
+            ],
+            "EXTRA_FLAGS": ["-std=c++17"]
+        }
+    ]
+}
+
+/* ============================================================================ */
+/* FILE: src/com/example/polyglot/JavaBridge.java */
+/* ============================================================================ */
+
+package com.example.polyglot;
+
+public class JavaBridge {
+    static {
+        // Direct link to the shared objects output mapped inside native.cpp
+        System.loadLibrary("native");
+    }
+
+    // JNI Native Function declaration mapping directly to our C++ translation unit
+    public native String stringFromNativeJNI();
+
+    public String getCompiledMessageFromJava() {
+        String nativeOutput = stringFromNativeJNI();
+        return "Java Bridge Interop -> " + nativeOutput;
+    }
+}/* FILE: AndroidManifest.xml */
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.polyglot"
+    android:versionCode="1"
+    android:versionName="1.0">
+    
+    <uses-sdk
+        android:minSdkVersion="30"
+        android:targetSdkVersion="34"/>
+
+    <application
+        android:label="Polyglot Hello"
+        android:hasCode="true"
+        android:debuggable="true">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>/* FILE: config.json */
+{
+    "PROJECT": {
+        "NAME": "PolyglotTest",
+        "MIN_SDK": "30",
+        "TARGET_SDK": "34",
+        "BUILD_TYPE": "debug",
+        "JAVA_VERSION": "17"
+    },
+    "PATHS": {
+        "SDK_ROOT": "~/android-sdk/Sdk",
+        "NDK_BIN": "~/android-sdk/Sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-android/bin",
+        "TERMUX_BIN": "/data/data/com.termux/files/usr/bin",
+        "KEYSTORE": "~/.android/debug.keystore",
+        "KEYSTORE_ALIAS": "androiddebugkey"
+    },
+    "STRUCTURE": {
+        "SRC_DIR": "src",
+        "RES_DIR": "res",
+        "MANIFEST": "AndroidManifest.xml",
+        "BIN_DIR": "bin"
+    },
+    "COMPILER_SETTINGS": {
+        "ZIP_ALIGNMENT": "4",
+        "JAVAC_FLAGS": [],
+        "NDK_FLAGS": ["-O3", "-fPIC"]
+    },
+    "NATIVE_TARGETS": [
+        {
+            "NAME": "native",
+            "SOURCES": [
+                "src/C/main_logic.c",
+                "src/C++/native_bridge.cpp"
+            ],
+            "EXTRA_FLAGS": ["-std=c++17"]
+        }
+    ]
+}
+
+/* ============================================================================ */
+/* FILE: src/com/example/polyglot/MainActivity.kt */
+/* ============================================================================ */
+
+package com.example.polyglot;
+
+import android.app.Activity
+import android.os.Bundle
+import android.widget.TextView
+
+class MainActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        // Instantiate the Java class to run cross-compilation validation checks
+        val bridge = JavaBridge()
+        val displayString = bridge.compiledMessageFromJava
+
+        val textViewer = findViewById<TextView>(R.id.display_view)
+        textViewer.text = displayString
+    }
+}/* FILE: AndroidManifest.xml */
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.polyglot"
+    android:versionCode="1"
+    android:versionName="1.0">
+    
+    <uses-sdk
+        android:minSdkVersion="30"
+        android:targetSdkVersion="34"/>
+
+    <application
+        android:label="Polyglot Hello"
+        android:hasCode="true"
+        android:debuggable="true">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>/* FILE: config.json */
+{
+    "PROJECT": {
+        "NAME": "PolyglotTest",
+        "MIN_SDK": "30",
+        "TARGET_SDK": "34",
+        "BUILD_TYPE": "debug",
+        "JAVA_VERSION": "17"
+    },
+    "PATHS": {
+        "SDK_ROOT": "~/android-sdk/Sdk",
+        "NDK_BIN": "~/android-sdk/Sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-android/bin",
+        "TERMUX_BIN": "/data/data/com.termux/files/usr/bin",
+        "KEYSTORE": "~/.android/debug.keystore",
+        "KEYSTORE_ALIAS": "androiddebugkey"
+    },
+    "STRUCTURE": {
+        "SRC_DIR": "src",
+        "RES_DIR": "res",
+        "MANIFEST": "AndroidManifest.xml",
+        "BIN_DIR": "bin"
+    },
+    "COMPILER_SETTINGS": {
+        "ZIP_ALIGNMENT": "4",
+        "JAVAC_FLAGS": [],
+        "NDK_FLAGS": ["-O3", "-fPIC"]
+    },
+    "NATIVE_TARGETS": [
+        {
+            "NAME": "native",
+            "SOURCES": [
+                "src/C/main_logic.c",
+                "src/C++/native_bridge.cpp"
+            ],
+            "EXTRA_FLAGS": ["-std=c++17"]
+        }
+    ]
+}
+
+/* ============================================================================ */
+/* FILE: res/layout/activity_main.xml */
+/* ============================================================================ */
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center">
+
+    <TextView
+        android:id="@+id/display_view"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="18sp"
+        android:textColor="#000000"
+        android:padding="16dp" />
+</LinearLayout>/* FILE: AndroidManifest.xml */
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.polyglot"
+    android:versionCode="1"
+    android:versionName="1.0">
+    
+    <uses-sdk
+        android:minSdkVersion="30"
+        android:targetSdkVersion="34"/>
+
+    <application
+        android:label="Polyglot Hello"
+        android:hasCode="true"
+        android:debuggable="true">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>/* FILE: config.json */
+{
+    "PROJECT": {
+        "NAME": "PolyglotTest",
+        "MIN_SDK": "30",
+        "TARGET_SDK": "34",
+        "BUILD_TYPE": "debug",
+        "JAVA_VERSION": "17"
+    },
+    "PATHS": {
+        "SDK_ROOT": "~/android-sdk/Sdk",
+        "NDK_BIN": "~/android-sdk/Sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-android/bin",
+        "TERMUX_BIN": "/data/data/com.termux/files/usr/bin",
+        "KEYSTORE": "~/.android/debug.keystore",
+        "KEYSTORE_ALIAS": "androiddebugkey"
+    },
+    "STRUCTURE": {
+        "SRC_DIR": "src",
+        "RES_DIR": "res",
+        "MANIFEST": "AndroidManifest.xml",
+        "BIN_DIR": "bin"
+    },
+    "COMPILER_SETTINGS": {
+        "ZIP_ALIGNMENT": "4",
+        "JAVAC_FLAGS": [],
+        "NDK_FLAGS": ["-O3", "-fPIC"]
+    },
+    "NATIVE_TARGETS": [
+        {
+            "NAME": "native",
+            "SOURCES": [
+                "src/C/main_logic.c",
+                "src/C++/native_bridge.cpp"
+            ],
+            "EXTRA_FLAGS": ["-std=c++17"]
+        }
+    ]
+}

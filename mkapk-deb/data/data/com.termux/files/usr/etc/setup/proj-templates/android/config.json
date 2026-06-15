@@ -1,0 +1,36 @@
+{
+    "PROJECT": {
+        "NAME": "PolyglotTest",
+        "MIN_SDK": "30",
+        "TARGET_SDK": "34",
+        "BUILD_TYPE": "debug",
+        "JAVA_VERSION": "17"
+    },
+    "PATHS": {
+        "SDK_ROOT": "~/android-sdk/Sdk",
+        "NDK_BIN": "~/android-sdk/Sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-android/bin",
+        "TERMUX_BIN": "/data/data/com.termux/files/usr/bin",
+        "KEYSTORE": "~/.android/debug.keystore",
+        "KEYSTORE_ALIAS": "androiddebugkey"
+    },
+    "STRUCTURE": {
+        "SRC_DIR": "src",
+        "RES_DIR": "res",
+        "MANIFEST": "AndroidManifest.xml",
+        "BIN_DIR": "bin"
+    },
+    "COMPILER_SETTINGS": {
+        "ZIP_ALIGNMENT": "4",
+        "JAVAC_FLAGS": [],
+        "NDK_FLAGS": ["-O3", "-fPIC"]
+    },
+    "NATIVE_TARGETS": [
+        {
+            "NAME": "native",
+            "SOURCES": [
+                "src/C/core_logic.c",
+                "src/C++/native_bridge.cpp"
+            ]
+        }
+    ]
+}

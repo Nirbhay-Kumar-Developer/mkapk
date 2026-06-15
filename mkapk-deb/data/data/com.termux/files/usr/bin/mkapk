@@ -1,0 +1,31 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Official mkapk Binary Launcher
+
+# 1. Dependency Auto-Installer
+if ! command -v python3 >/dev/null 2>&1; then
+    echo ">> [mkapk] Python3 missing. Bootstrapping environment..."
+    pkg update -y && pkg install python -y
+    if [ $? -ne 0 ]; then
+        echo ">> [ERROR] Bootstrap failed. Check internet/storage."
+        exit 1
+    fi
+fi
+
+# 2. Environment Variables
+# Ensures mkapk knows where its templates and internal modules are
+export MKAPK_HOME="$PREFIX/share/mkapk"
+export MKAPK_TEMPLATES="$PREFIX/etc/setup/proj-templates/android"
+export PYTHONPATH="$MKAPK_HOME"
+
+# 3. Execution Path
+BIN_PATH="$MKAPK_HOME/mkapk.pyc"
+
+if [ ! -f "$BIN_PATH" ]; then
+    echo ">> [INTERNAL ERROR] mkapk.pyc not found at $BIN_PATH"
+    echo ">> Try: apt install --reinstall mkapk"
+    exit 1
+fi
+
+# 4. Handoff to Python
+# -u ensures output isn't buffered (important for live build logs in Termux)
+exec python3 -u "$BIN_PATH" "$@"

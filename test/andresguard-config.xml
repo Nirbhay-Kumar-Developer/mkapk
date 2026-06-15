@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<resproguard>
+  <issue id="property">
+    <seventzip value="false"/>
+    <metaname value="META-INF"/>
+    <keeproot value="true"/>
+	<mergeDuplicatedRes value="true"/>
+  </issue>
+
+  <issue id="keepmapping" isactive="false">
+    <path value=""/>
+  </issue>
+
+  <issue id="compress" isactive="true">
+    <path value="*.png"/>
+    <path value="*.jpg"/>
+    <path value="*.jpeg"/>
+    <path value="*.gif"/>
+    </issue>
+
+</resproguard>

@@ -1,0 +1,1 @@
+.:/data/data/com.termux/files/home/android-sdk/Sdk/cmdline-tools/latest/lib/r8.jar:/data/data/com.termux/files/home/AndResGuard/AndResGuard-cli-1.2.15.jar:/data/data/com.termux/files/usr/share/java/apksigner.jar
