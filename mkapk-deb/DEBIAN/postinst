@@ -6,8 +6,8 @@ echo ">> Configuring mkapk build system..."
 mkdir -p /data/data/com.termux/files/home/android-sdk/Sdk/cmdline-tools
 
 # Download and extract the archive package
-echo ">> Dowmloading Android SDK command-line tools."
-wget -o /data/data/com.termux/files/home/commandlinetools-linux-14742923_latest.zip https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
+echo ">> Downloading Android SDK command-line tools."
+wget -O /data/data/com.termux/files/home/commandlinetools-linux-14742923_latest.zip https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
 
 echo ">> Extracting  command-line tools."
 unzip /data/data/com.termux/files/home/commandlinetools-linux-14742923_latest.zip -d /data/data/com.termux/files/home/android-sdk/Sdk/cmdline-tools/
@@ -16,7 +16,7 @@ unzip /data/data/com.termux/files/home/commandlinetools-linux-14742923_latest.zi
 echo ">> Setting up Android SDK"
 cd /data/data/com.termux/files/home/android-sdk/Sdk/cmdline-tools/
 mv cmdline-tools latest
-chmod +x $ANDROID_HOME/cmdline-tools/latest/bin/*
+chmod +x /data/data/com.termux/files/home/android-sdk/Sdk/cmdline-tools/latest/bin/*
 echo "export ANDROID_HOME=/data/data/com.termux/files/home/android-sdk/Sdk" >> /data/data/com.termux/files/usr/etc/bash.bashrc
 echo "export PATH=$PATH:/data/data/com.termux/files/home/android-sdk/Sdk/cmdline-tools/latest/bin" >> /data/data/com.termux/files/usr/etc/bash.bashrc
 source /data/data/com.termux/files/usr/etc/bash.bashrc
