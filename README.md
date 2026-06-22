@@ -4,7 +4,7 @@
 
 ---
 
-## ⚡ Features
+## Features
 
 * **Incremental Builds:** Automatically detects source changes and rebuilds only what is necessary, drastically cutting down iteration times.
 * **Obfuscation Engine:** Built-in support for Java, Kotlin, and resource obfuscation to protect your source code.
@@ -14,7 +14,7 @@
 
 ---
 
-## 🛠️ Prerequisites
+## Prerequisites
 
 Before compiling or running `mkapk`, you need to ensure the required native build utilities, Java development kit, and Android platform tools are installed in your Termux environment.
 
@@ -42,7 +42,13 @@ apt update && apt install openjdk-21 ndk-multilib aapt2 clang binutils libzip op
 
 ---
 
-## 🛠️ Usage Instructions
+## Project template Repository
+<a href="https://github.com/Nirbhay-Kumar-Developer/mkapk-template">Template</a>
+
+
+---
+
+## Usage Instructions
 
 ### Project Setup
 
