@@ -7,7 +7,9 @@
 #include <map>
 #include <set>
 #include <sstream>
-#include <openssl/md5.h>
+#include <iomanip>
+#define XXH_INLINE_ALL 
+#include <xxhash.h>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 
@@ -15,7 +17,8 @@ namespace fs = std::filesystem;
 
 /**
  * SECTION 1: HASHING ENGINE
-  */
+ * Refactored: Replaced OpenSSL MD5 with highly optimized XXH3 64-bit streaming.
+ */
 std::string get_file_hash(const fs::path& file_path) {
     if (!fs::exists(file_path)) {
         return "";
@@ -24,21 +27,32 @@ std::string get_file_hash(const fs::path& file_path) {
     std::ifstream file(file_path, std::ios::binary);
     if (!file.is_open()) return "";
 
-    MD5_CTX md5Context;
-    MD5_Init(&md5Context);
+    // Allocate and initialize xxHash XXH3 state context
+    XXH3_state_t* state = XXH3_createState();
+    if (state == nullptr) return "";
+    
+    // Initialize the XXH3 variant
+    if (XXH3_64bits_reset(state) == XXH_ERROR) {
+        XXH3_freeState(state);
+        return "";
+    }
+
     char buffer[4096];
     while (file.read(buffer, sizeof(buffer)) || file.gcount()) {
-        MD5_Update(&md5Context, buffer, file.gcount());
+        if (XXH3_64bits_update(state, buffer, file.gcount()) == XXH_ERROR) {
+            XXH3_freeState(state);
+            return "";
+        }
     }
 
-    unsigned char result[MD5_DIGEST_LENGTH];
-    MD5_Final(result, &md5Context);
+    // Finalize the XXH3 64-bit hash computation
+    XXH64_hash_t hash = XXH3_64bits_digest(state);
+    XXH3_freeState(state);
 
-    char hexResult[2 * MD5_DIGEST_LENGTH + 1];
-    for (int i = 0; i < MD5_DIGEST_LENGTH; ++i) {
-        sprintf(&hexResult[i * 2], "%02x", result[i]);
-    }
-    return std::string(hexResult);
+    // Format the 64-bit unsigned integer result into a lowercase hexadecimal string
+    std::stringstream stream;
+    stream << std::setfill('0') << std::setw(16) << std::hex << hash;
+    return stream.str();
 }
 
 /**
