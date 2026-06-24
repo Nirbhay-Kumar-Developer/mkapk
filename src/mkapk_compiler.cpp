@@ -9,6 +9,7 @@
 #include <utility>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
 
@@ -54,11 +55,11 @@ void execute_plugin_compiler(
 {
     if (files.empty()) return;
 
-    std::cout << ">> [" << plugin.name << "] Compiling " << files.size() << " files via " << plugin.compiler << "...";
+    std::string details = "Compiling " + std::to_string(files.size()) + " files via " + plugin.compiler;
     if (plugin.is_verified) {
-        std::cout << " [Verified Driver]";
+        details += " [Verified Driver]";
     }
-    std::cout << std::endl;
+    UI::stage(plugin.name, details);
 
     std::vector<std::string> args = { plugin.compiler };
 
@@ -143,6 +144,7 @@ std::pair<fs::path, fs::path> compile_source_logic(
         std::vector<fs::path> joint_sources = changed_files["kotlin"];
         joint_sources.insert(joint_sources.end(), unified_java_sources.begin(), unified_java_sources.end());
 
+        UI::stage(UI::Msg::KOTLIN_STAGE, "Joint analysis mapping active");
         compile_incremental_kotlin(
             tools["kotlinc"],
             fs::absolute(android_jar),
@@ -159,7 +161,7 @@ std::pair<fs::path, fs::path> compile_source_logic(
         std::string java_ver = MkapkEnv::get_json_val("JAVA_VERSION", config_content);
         if (java_ver.empty()) java_ver = "11";
         
-        std::cout << ">> [JAVA] Compiling " << changed_files["java"].size() << " files (including generated references)..." << std::endl;
+        UI::stage(UI::Msg::JAVA_STAGE, std::to_string(changed_files["java"].size()) + " files total");
         compile_incremental_java(java_ver, {}, fs::absolute(android_jar), fs::absolute(java_out), changed_files["java"], run);
     }
 
@@ -177,7 +179,7 @@ std::pair<fs::path, fs::path> compile_source_logic(
 
     // --- PHASE 5: NATIVE ENGINES VERIFICATION PASS ---
     if (changed_files.find("native") != changed_files.end() && !changed_files["native"].empty()) {
-        std::cout << ">> [NATIVE] Processing localized C/C++ core module updates..." << std::endl;
+        UI::info("Found pending updates for localized C/C++ core modules.");
     }
 
     return {java_out, dex_cache};

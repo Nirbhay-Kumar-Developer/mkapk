@@ -9,6 +9,7 @@
 #include <sstream>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
 
@@ -26,7 +27,7 @@ static pid_t daemon_pid = -1;
  */
 void start_daemon(const std::string& classpath) {
     if (pipe(pipe_to_jvm) == -1 || pipe(pipe_from_jvm) == -1 || pipe(pipe_err_from_jvm) == -1) {
-        throw std::runtime_error("!! System Error: Failed to create IPC pipes.");
+        throw std::runtime_error("System resource allocation failure: Failed to create IPC pipes.");
     }
 
     daemon_pid = fork();
@@ -41,13 +42,12 @@ void start_daemon(const std::string& classpath) {
         close(pipe_err_from_jvm[0]);
 
         execlp("java", "java", 
-               "-Djava.security.manager=allow", 
+               "-Djava.security.manager=allow",
                "-cp", classpath.c_str(), 
                "com.mkapk.tools.MkapkTools", 
                nullptr);
         
-        std::cerr << "!! Daemon Error: Could not launch OpenJDK 'java' binary." << std::endl;
-        _exit(1);
+        _exit(127);
     } 
     else if (daemon_pid > 0) { // Parent Process: mkapk Native
         close(pipe_to_jvm[0]);
@@ -56,7 +56,7 @@ void start_daemon(const std::string& classpath) {
 
         std::string start_cmd = "START_DAEMON\n";
         if (write(pipe_to_jvm[1], start_cmd.c_str(), start_cmd.length()) == -1) {
-             throw std::runtime_error("!! System Error: Failed to write to JVM pipe.");
+             throw std::runtime_error("System write synchronization failed on JVM entry command.");
         }
 
         const std::vector<std::string> TARGET_SEQUENCE = {
@@ -72,7 +72,7 @@ void start_daemon(const std::string& classpath) {
 
         auto flush_err_lines = [&]() {
             for (const auto& line : buffered_err_lines) {
-                std::cerr << line << "\n";
+                UI::warn("JVM Internal Trace: " + line);
             }
             buffered_err_lines.clear();
             sequence_state = 0;
@@ -91,9 +91,9 @@ void start_daemon(const std::string& classpath) {
                 std::string err_msg = "";
                 if (err_n > 0) {
                     err_buf[err_n] = '\0';
-                    err_msg = "\nStderr: " + std::string(err_buf);
+                    err_msg = " Stderr context: " + std::string(err_buf);
                 }
-                throw std::runtime_error("!! Daemon Error: Handshake failed.\nOutput: " + resp + err_msg);
+                throw std::runtime_error(UI::Msg::DAEMON_FAIL + " Handshake mismatch. Response output: " + resp + err_msg);
             }
 
             char err_chunk[4096];
@@ -132,10 +132,10 @@ void start_daemon(const std::string& classpath) {
                 }
             }
         } else {
-            throw std::runtime_error("!! Daemon Error: JVM process died immediately after start.");
+            throw std::runtime_error(UI::Msg::DAEMON_FAIL + " JVM subprocess terminated abruptly during runtime sequence bootstrapping.");
         }
     } else {
-        throw std::runtime_error("!! System Error: Failed to fork JVM Daemon.");
+        throw std::runtime_error("System execution fork failure routing background processes.");
     }
 }
 
@@ -145,7 +145,9 @@ void start_daemon(const std::string& classpath) {
 void stop_daemon() {
     if (daemon_pid > 0) {
         std::string stop_cmd = "STOP_DAEMON\n";
-        write(pipe_to_jvm[1], stop_cmd.c_str(), stop_cmd.length());
+        if (write(pipe_to_jvm[1], stop_cmd.c_str(), stop_cmd.length()) == -1) {
+            UI::warn("Failed to transmit tear-down sequence to operational background daemon.");
+        }
         
         close(pipe_to_jvm[1]);
         close(pipe_from_jvm[0]);
@@ -161,7 +163,7 @@ void stop_daemon() {
  */
 void call_java_tool(const std::vector<std::string>& args) {
     if (daemon_pid <= 0) {
-        throw std::runtime_error("!! Daemon Error: JVM process is not running.");
+        throw std::runtime_error("Daemon connection tracking flag inactive: JVM execution thread terminated.");
     }
 
     std::stringstream ss;
@@ -171,19 +173,43 @@ void call_java_tool(const std::vector<std::string>& args) {
     std::string msg = ss.str() + "\n";
 
     if (write(pipe_to_jvm[1], msg.c_str(), msg.length()) == -1) {
-        throw std::runtime_error("!! Daemon Error: Broken pipe to JVM.");
+        throw std::runtime_error("IPC channel tracking broken link: Writing transaction dropped on active JVM pipeline execution.");
     }
 
     char buffer[4096];
+    std::string line_accumulator;
     while (true) {
         ssize_t n = read(pipe_from_jvm[0], buffer, sizeof(buffer) - 1);
-        if (n <= 0) throw std::runtime_error("!! Daemon Error: JVM terminated unexpectedly.");
+        if (n <= 0) throw std::runtime_error("IPC connection dropped out of scope: Daemon closed channel before execution milestone reached.");
         
         buffer[n] = '\0';
         std::string resp(buffer);
         
         if (resp.find("MKAPK_TASK_DONE") != std::string::npos) break;
-        std::cout << resp; 
+
+        // Route stdout diagnostics securely through thread-safe UI framework line by line
+        line_accumulator += resp;
+        size_t newline_pos;
+        while ((newline_pos = line_accumulator.find('\n')) != std::string::npos) {
+            std::string line = line_accumulator.substr(0, newline_pos);
+            line_accumulator = line_accumulator.substr(newline_pos + 1);
+            
+            if (line.empty()) continue;
+
+            // --- INTERCEPT PROTOCOL LOGGING TAGS FROM JAVA DAEMON ---
+            if (line.rfind("[ERROR]|", 0) == 0) {
+                // Route directly to UI error handler (stripping the 8-character tag)
+                UI::error(line.substr(8));
+            } 
+            else if (line.rfind("[WARN]|", 0) == 0) {
+                // Route directly to UI warning handler (stripping the 7-character tag)
+                UI::warn(line.substr(7));
+            } 
+            else {
+                // Fallback for general underlying tool standard output streams (d8, r8, apksigner, etc.)
+                UI::info("[" + args[0] + " stdout] " + line);
+            }
+        }
     }
 }
 
@@ -214,7 +240,8 @@ void smart_run(const std::vector<std::string>& args, const std::string& err_msg)
             int status;
             waitpid(pid, &status, 0);
             if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                throw std::runtime_error("!! Build Failed: " + err_msg + " (" + tool_name + ")");
+                int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+                throw std::runtime_error("External tool runtime execution anomaly flags raised inside (" + tool_name + "). Message mapping reference context: " + err_msg + " (Exit code: " + std::to_string(exit_code) + ")");
             }
         }
     }

@@ -9,8 +9,9 @@
 #include <sstream>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <nlohmann/json.hpp> // Nlohmann JSON Engine
+#include <nlohmann/json.hpp>
 #include "mkapk_helpers.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -104,7 +105,7 @@ namespace MkapkEnv {
         fs::path termux_jar = fs::path(TERMUX_LIB) / "android.jar";
         if (fs::exists(termux_jar)) return termux_jar;
 
-        throw std::runtime_error("!! Error: android.jar not found. Check SDK_ROOT in config.json.");
+        throw std::runtime_error("android.jar file dependencies not found. Please review the SDK_ROOT target parameter inside config.json.");
     }
 
     std::string read_config_file() {
@@ -131,7 +132,7 @@ namespace MkapkEnv {
     std::string get_jni_classpath(const std::string& config_content) {
         std::string sdk_root_str = get_json_val("SDK_ROOT", config_content);
         if (sdk_root_str.empty()) {
-             std::cerr << "!! Warning: SDK_ROOT not defined in config.json." << std::endl;
+             UI::warn("SDK_ROOT variable context not explicit in project layout configuration file.");
         }
         
         fs::path sdk_root = resolve_path(sdk_root_str);
@@ -147,13 +148,13 @@ namespace MkapkEnv {
         std::vector<std::string> cp_entries;
         
         if (fs::exists(coord_jar)) cp_entries.push_back(coord_jar.string());
-        else std::cerr << "!! Missing: " << coord_jar << std::endl;
+        else UI::error("Missing tool dependency footprint registry path", coord_jar.string());
 
         if (fs::exists(r8_jar)) cp_entries.push_back(r8_jar.string());
-        else std::cerr << "!! Missing: " << r8_jar << std::endl;
+        else UI::error("Missing tool dependency footprint registry path", r8_jar.string());
         
         if (fs::exists(apksigner_jar)) cp_entries.push_back(apksigner_jar.string());
-        else std::cerr << "!! Missing: " << apksigner_jar << std::endl;
+        else UI::error("Missing tool dependency footprint registry path", apksigner_jar.string());
 
         if (fs::exists(d8_jar)) cp_entries.push_back(d8_jar.string());
 
@@ -172,7 +173,6 @@ namespace MkapkEnv {
         try {
             json j = json::parse(config_content);
             
-            // Validate the targets block exists and is a strictly formatted array
             if (j.contains("NATIVE_TARGETS") && j["NATIVE_TARGETS"].is_array()) {
                 for (const auto& item : j["NATIVE_TARGETS"]) {
                     NativeTargetConfig cfg;
@@ -197,7 +197,7 @@ namespace MkapkEnv {
                 }
             }
         } catch (const json::parse_error& e) {
-            std::cerr << "!! JSON Parse Error in NATIVE_TARGETS: " << e.what() << std::endl;
+            UI::error("JSON Structural compilation parsing check failed inside NATIVE_TARGETS definition blocks.", e.what());
         }
         return targets;
     }
@@ -206,10 +206,10 @@ namespace MkapkEnv {
         fs::create_directories(PLUGINS_CACHE_DIR);
 
         const fs::path TEMPLATE_PATH = fs::path(TERMUX_ETC) / "setup/proj-templates/android";
-        std::cout << ">> Initializing project structure from templates..." << std::endl;
+        UI::stage("Initialization", "Seeding default template paths structure");
 
         if (!fs::exists(TEMPLATE_PATH)) {
-            std::cerr << "!! Error: Template source not found at " << TEMPLATE_PATH << std::endl;
+            UI::error("Target directory mirroring path location not verified structural setup layout base", TEMPLATE_PATH.string());
             return false;
         }
 
@@ -223,22 +223,20 @@ namespace MkapkEnv {
                 } else {
                     fs::copy_file(src, dest, fs::copy_options::overwrite_existing);
                 }
-                std::cout << "   [+] Created: " << src.filename().string() << std::endl;
+                UI::info("Created project template file mirror mapping layer: " + src.filename().string());
             }
-            std::cout << "✨ Project initialized successfully." << std::endl;
+            UI::success("Operational workspace parameters initialized cleanly.");
             return true;
         } catch (const fs::filesystem_error& e) {
-            std::cerr << "!! Filesystem Error: " << e.what() << std::endl;
+            UI::error("Filesystem failure encountered during layout environment setup routine execution.", e.what());
             return false;
         }
     }
-
-    // EXTENSIBLE PACKAGE MANAGEMENT PLUGIN FRAMEWORK CORE LAYER
    
     bool install_plugin(const std::string& pl_package_path) {
         fs::path src_zip = resolve_path(pl_package_path);
         if (!fs::exists(src_zip)) {
-            std::cerr << "!! Error: Plugin package archive file not found at: " << src_zip << std::endl;
+            UI::error("Plugin bundle tracking entry location could not be verified", src_zip.string());
             return false;
         }
 
@@ -247,9 +245,9 @@ namespace MkapkEnv {
         fs::remove_all(staging_dir);
         fs::create_directories(staging_dir);
 
-        std::cout << ">> Extracting plugin archive payload data..." << std::endl;
+        UI::info("Decompressing raw extension components data payloads...");
         if (!run_system_cmd({"unzip", "-q", src_zip.string(), "-d", staging_dir.string()})) {
-            std::cerr << "!! Error: Failed to extract .pl zip manifest container package." << std::endl;
+            UI::error("Failed to unpack targeted extension installer bundle wrapper.");
             fs::remove_all(staging_dir);
             return false;
         }
@@ -258,12 +256,11 @@ namespace MkapkEnv {
         fs::path signature_path = staging_dir / "signature.sig";
 
         if (!fs::exists(manifest_path)) {
-            std::cerr << "!! Error: Invalid plugin structure. Missing 'plugin.json'." << std::endl;
+            UI::error("Invalid structural layout signature mapping. Extension descriptor configuration manifest omitted.");
             fs::remove_all(staging_dir);
             return false;
         }
 
-        // --- CRYPTOGRAPHIC VERIFICATION BRIDGE CHAIN ---
         bool verified_stamp = false;
         if (fs::exists(signature_path)) {
             fs::path pubkey_temp = staging_dir / "mkapk_pub.pem";
@@ -277,7 +274,6 @@ namespace MkapkEnv {
             }
         }
 
-        // Load config content metadata fields using Nlohmann
         std::ifstream mf(manifest_path);
         std::string plug_name, comp_bin, apt_pkg;
         try {
@@ -287,38 +283,38 @@ namespace MkapkEnv {
             comp_bin = j.value("compiler", "");
             apt_pkg = j.value("apt-package", "");
         } catch (const json::parse_error& e) {
-            std::cerr << "!! Error: Plugin manifest JSON format invalid: " << e.what() << std::endl;
+            UI::error("Extension configuration parsing layout parameters corrupted inside file registry.", e.what());
             fs::remove_all(staging_dir);
             return false;
         }
         mf.close();
 
         if (plug_name.empty() || comp_bin.empty()) {
-            std::cerr << "!! Error: Structural plugin parameters inside manifest file appear corrupted." << std::endl;
+            UI::error("Target data keys missing inside initialization schema framework structures.");
             fs::remove_all(staging_dir);
             return false;
         }
 
         if (verified_stamp) {
-            std::cout << "🛡️  Package cryptographic signature checked: [MKAPK VERIFIED COMPONENT]" << std::endl;
+            UI::success("Cryptographic validation confirmed: [MKAPK AUTHORIZED SECURITY KEY PROFILE BOUNDARY SETUP]", "🛡️  ");
         } else {
-            std::cout << "⚠️  Package signature verification failed or absent: [THIRD PARTY UNSIGNED PLUGIN]" << std::endl;
+            UI::warn("Extension verification signature structural block omitted or non-compliant: [UNSIGNED DEVELOPER ASSET]");
         }
 
-        std::cout << ">> Auditing local compiler tools dependencies for: " << comp_bin << "..." << std::endl;
+        UI::info("Validating localization context dependencies mapping trees for driver compiler: " + comp_bin);
         if (!run_system_cmd({"command", "-v", comp_bin})) {
             if (!apt_pkg.empty()) {
-                std::cout << ">> Tool missing. Bridging system execution to Termux repository for: " << apt_pkg << "..." << std::endl;
+                UI::info("Binary interface missing locally. Bridging tool discovery channels to Termux package indexes: " + apt_pkg);
                 if (!run_system_cmd({"apt", "install", "-y", apt_pkg})) {
-                    std::cerr << "!! Warning: Automated apt engine failed execution tracking.\n"
-                              << "   Please install the '" << comp_bin << "' compiler framework dependencies manually." << std::endl;
+                    UI::warn("Automated apt synchronization engine tracking returned execution anomaly flags.\n"
+                             "   Please implement standalone terminal tracking steps for binary path: '" + comp_bin + "' manual installations.");
                 }
             } else {
-                std::cerr << "!! Warning: No backend system distribution package noted.\n"
-                          << "   Please ensure '" << comp_bin << "' binary paths are configured manually." << std::endl;
+                UI::warn("No distribution provider configuration parameters noted.\n"
+                         "   Ensure system execution binary paths mapping properties for '" + comp_bin + "' framework files are configured manually.");
             }
         } else {
-            std::cout << ">> Found tool footprint dependency localized cleanly." << std::endl;
+            UI::info("Driver dependency verification complete. Footprint signature localized correctly inside system shell.");
         }
 
         fs::path final_dest = fs::path(PLUGINS_CACHE_DIR) / plug_name;
@@ -334,23 +330,23 @@ namespace MkapkEnv {
         }
 
         fs::remove_all(staging_dir);
-        std::cout << "✨ Plugin '" << plug_name << "' installed successfully into operational caches." << std::endl;
+        UI::success("Extension registry plugin matching profile identification handle '" + plug_name + "' successfully loaded to target storage directories.");
         return true;
     }
 
     bool uninstall_plugin(const std::string& plugin_name) {
         fs::path target_path = fs::path(PLUGINS_CACHE_DIR) / plugin_name;
         if (!fs::exists(target_path)) {
-            std::cerr << "!! Error: No active installed plugin registration discovered for: " << plugin_name << std::endl;
+            UI::error("Extension structural context database verification target path location mapping omitted for key handle", plugin_name);
             return false;
         }
 
         try {
             fs::remove_all(target_path);
-            std::cout << "✨ Plugin footprint matching name '" << plugin_name << "' removed cleanly from active registries." << std::endl;
+            UI::success("Plugin mapping metadata tracking nodes for identifier tag '" + plugin_name + "' cleanly deleted from operational layouts.");
             return true;
         } catch (const fs::filesystem_error& e) {
-            std::cerr << "!! Filesystem error during cleanup: " << e.what() << std::endl;
+            UI::error("Filesystem failure tracking routine mapping deletion calls.", e.what());
             return false;
         }
     }
@@ -395,7 +391,6 @@ namespace MkapkEnv {
                             active_registry[plugin.source_extension] = plugin;
                         }
                     } catch (const json::parse_error&) {
-                        // Suppress output for silent background caching
                         continue;
                     }
                 }

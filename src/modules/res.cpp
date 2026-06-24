@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <functional>
 #include "mkapk_helpers.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
 
@@ -22,13 +23,13 @@ void compile_resources(
     fs::create_directories(flat_dir);
 
     if (!fs::exists(res_dir)) {
-        std::cerr << "!! Resource directory not found: " << res_dir << std::endl;
+        UI::error("Resource directory not found context check dropped matching path", res_dir.string());
         return;
     }
 
     // Case 1: First build or force-all rebuild (changed_res_files is nullptr)
     if (changed_res_files == nullptr) {
-        std::cout << ">> [RES] Compiling all resources (aapt2 compile)..." << std::endl;
+        UI::stage(UI::Msg::RES_STAGE, "Compiling all localized targets via aapt2");
         
         std::vector<std::string> args = {
             AAPT2, "compile",
@@ -40,8 +41,7 @@ void compile_resources(
     } 
     // Case 2: Incremental build (Batching specific files)
     else if (!changed_res_files->empty()) {
-        std::cout << ">> [RES] Compiling " << changed_res_files->size() 
-                  << " changed resources (BATCH)..." << std::endl;
+        UI::stage(UI::Msg::RES_STAGE, "Batch compilation pass for " + std::to_string(changed_res_files->size()) + " files");
 
         std::vector<std::string> args = {
             AAPT2, "compile",
@@ -57,7 +57,7 @@ void compile_resources(
     } 
     // Case 3: No changes detected by the hash checker
     else {
-        std::cout << ">> [RES] No resource changes detected." << std::endl;
+        UI::info("No resource modifications tracked by change engine.");
     }
 }
 
@@ -75,13 +75,11 @@ void link_manifest(
     RunFunc run_func,
     bool debug) 
 {
-    std::cout << ">> [RES] Linking Manifest & Resources " 
-              << (debug ? "(DEBUG)" : "") << "..." << std::endl;
+    UI::stage("Resource Linker", debug ? "Assembling development variant (DEBUG)" : "Assembling production variant");
 
     fs::path flat_dir = bin_dir / "flat_res";
     if (!fs::exists(flat_dir) || fs::is_empty(flat_dir)) {
-        std::cerr << "!! Error: No compiled flat resources found." << std::endl;
-        std::exit(1); // Force exit on critical failure
+        throw std::runtime_error("Compilation path context empty: No verified intermediate .flat asset data ready for link passes.");
     }
 
     // Base link command
@@ -103,7 +101,7 @@ void link_manifest(
 
     if (debug) args.push_back("--debug-mode");
 
-    run_func(args, "Manifest linking failed");
+    run_func(args, "Manifest asset linking generation dropped errors.");
 }
 
 
@@ -116,11 +114,11 @@ fs::path obfuscate_resources(
     RunFunc run_func) 
 {
     if (!fs::exists(resguard_jar)) {
-        std::cout << ">> [RES] AndResGuard JAR missing. Skipping obfuscation." << std::endl;
+        UI::info("AndResGuard tool signature missing inside current profile. Skipping footprint shrinking optimizations.");
         return in_apk;
     }
 
-    std::cout << ">> [RES] Obfuscating Resources (AndResGuard)..." << std::endl;
+    UI::stage("Obfuscator", "Executing asset minification routines via AndResGuard");
 
     fs::path resguard_out = bin_dir / "resguard_out";
     if (fs::exists(resguard_out)) fs::remove_all(resguard_out);
@@ -132,7 +130,7 @@ fs::path obfuscate_resources(
         "-config", fs::absolute(config_xml).string()
     };
 
-    run_func(args, "AndResGuard optimization failed");
+    run_func(args, "AndResGuard alignment package translation failure.");
 
     // Search for the optimized APK in the ResGuard output tree
     for (const auto& entry : fs::recursive_directory_iterator(resguard_out)) {
@@ -141,6 +139,6 @@ fs::path obfuscate_resources(
         }
     }
 
-    std::cerr << "!! AndResGuard output APK not found. Falling back to original." << std::endl;
+    UI::warn("AndResGuard process finished execution but target path container map returned empty. Reverting to base package.");
     return in_apk;
 }

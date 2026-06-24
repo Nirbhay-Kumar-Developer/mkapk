@@ -10,6 +10,7 @@
 #include <functional>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
+#include "mkapk_ui.hpp"
 #include <cctype>
 
 namespace fs = std::filesystem;
@@ -82,7 +83,7 @@ void auto_place_system_libraries(const std::string& config_content, const fs::pa
         targeted_libs.push_back("c++_shared");
     }
 
-    std::cout << ">> [NDK] Auto-resolving system shared dependencies from Termux ndk-multilib..." << std::endl;
+    UI::stage("NDK Syslibs", "Auto-resolving system shared dependencies from Termux ndk-multilib");
 
     fs::path termux_usr_dir = "/data/data/com.termux/files/usr";
     fs::path termux_global_lib = "/data/data/com.termux/files/usr/lib";
@@ -168,14 +169,12 @@ void auto_place_system_libraries(const std::string& config_content, const fs::pa
             if (found) {
                 try {
                     fs::copy_file(source_file, target_abi_dir / filename, fs::copy_options::overwrite_existing);
-                    std::cout << "   [+] Auto-placed [" << abi_name << "]: " << filename << std::endl;
+                    UI::info("[+] Auto-placed [" + abi_name + "]: " + filename);
                 } catch (const fs::filesystem_error& e) {
-                    std::cerr << "!! Error copying " << filename << " to " << abi_name << ": " << e.what() << std::endl;
+                    UI::error("Failed copying library dependency target context: " + filename + " to " + abi_name, e.what());
                 }
             } else {
-                std::cerr << "!! Architecture Build Error: Cannot resolve dependency library '" << filename 
-                          << "' for targeted ABI [" << abi_name << "]." << std::endl;
-                std::exit(1);
+                throw std::runtime_error("Architecture Build Error: Cannot resolve dependency library runtime file link handle '" + filename + "' for targeted ABI [" + abi_name + "].");
             }
         }
     }
@@ -195,7 +194,7 @@ void inject_assets_and_dex(
     const std::vector<std::string>& allowed_abis,
     bool is_release) // Added is_release control flag to govern the optimization pipeline
 {
-    std::cout << ">> [FINISH] Injecting DEX, Assets, and Filtered Native Libs..." << std::endl;
+    UI::stage("Packager", "Injecting DEX bytecode components, raw runtime assets, and cross-compiled libraries mapping tables");
 
     fs::path dex_file = bin_dir / "classes.dex";
     fs::path native_libs_path = bin_dir / "lib";
@@ -203,7 +202,7 @@ void inject_assets_and_dex(
 
     int err = 0;
     zip_t* apk = zip_open(unsigned_apk.string().c_str(), 0, &err);
-    if (!apk) throw std::runtime_error("Failed to open APK for injection.");
+    if (!apk) throw std::runtime_error("Compression error encounter boundary broken: Failed to open target unsigned container archive for assembly injection steps.");
 
     std::map<std::string, fs::path> injection_map;
     if (fs::exists(dex_file)) injection_map["classes.dex"] = dex_file;
@@ -272,13 +271,13 @@ void inject_assets_and_dex(
 
         // OPTIMIZATION 1: If it's a release build and a native library, strip all debug symbols!
         if (is_release && is_native_lib) {
-            std::cout << "   [STRIP] Evicting unneeded symbols from runtime asset: " << arc_path << std::endl;
+            UI::info("[STRIP] Evicting unneeded metadata symbols from runtime asset: " + arc_path);
             
             // Execute Termux's local host 'strip' binary on the file before archiving it
             std::string strip_cmd = "strip --strip-unneeded " + fs::absolute(real_path).string();
             int ret = std::system(strip_cmd.c_str());
             if (ret != 0) {
-                std::cerr << "!! Warning: Code stripping execution pass failed for " << arc_path << std::endl;
+                UI::warn("Code stripping tool chain optimization layer execution pass dropped error signals on: " + arc_path);
             }
         }
 
@@ -290,11 +289,11 @@ void inject_assets_and_dex(
                 if (is_release) {
                     // OPTIMIZATION 2A: Use maximum DEFLATE compression for production release size minimization
                     zip_set_file_compression(apk, new_idx, ZIP_CM_DEFLATE, 9);
-                    std::cout << "   [RELEASE-COMPRESS] Deflated: " << arc_path << " (Maximum Size Savings)" << std::endl;
+                    UI::info("[RELEASE-COMPRESS] Deflated allocation table layout: " + arc_path + " (Max Size Savings)");
                 } else {
                     // OPTIMIZATION 2B: Keep completely uncompressed for debug zero-extraction memory maps
                     zip_set_file_compression(apk, new_idx, ZIP_CM_STORE, 0);
-                    std::cout << "   [DEBUG-STORE] Stored uncompressed: " << arc_path << " (Page-Alignment Ready)" << std::endl;
+                    UI::info("[DEBUG-STORE] Stored uncompressed asset chunk: " + arc_path + " (Zero-Extraction Layout Ready)");
                 }
             }
         }
@@ -307,7 +306,7 @@ void inject_assets_and_dex(
 
 fs::path align_apk(const std::string& ZIPALIGN, const std::string& alignment, 
                          const fs::path& in_apk, const fs::path& bin_dir, RunFunc run_func) {
-    std::cout << ">> [FINISH] Aligning APK (zipalign)..." << std::endl;
+    UI::stage("ZipAlign", "Aligning archive layout borders for RAM access page performance optimizations");
     fs::path aligned_apk = bin_dir / "aligned_temp.apk";
 
     if (fs::exists(aligned_apk)) fs::remove(aligned_apk);
@@ -315,7 +314,7 @@ fs::path align_apk(const std::string& ZIPALIGN, const std::string& alignment,
     run_func({
         ZIPALIGN, "-f", "-p", alignment,
         in_apk.string(), aligned_apk.string()
-    }, "Zipalign failed");
+    }, "Zipalign verification and translation run dropped tracking error boundaries.");
 
     return aligned_apk;
 }
@@ -326,12 +325,11 @@ void sign_apk(const std::string& APKSIGNER, const fs::path& final_apk,
                     const fs::path& aligned_apk, const std::string& keystore, 
                     const std::string& alias, RunFunc run_func) {
     
-    std::cout << ">> [FINISH] Signing APK -> " << final_apk.filename().string() << std::endl;
+    UI::stage("ApkSigner", "Generating cryptographic profile signatures block into " + final_apk.filename().string());
 
     fs::path ks_path = fs::absolute(keystore);
     if (!fs::exists(ks_path)) {
-        std::cerr << "!! Error: Keystore not found at " << ks_path << std::endl;
-        std::exit(1);
+        throw std::runtime_error("Security certificate footprint missing: Security profile store file not verified at destination context: " + ks_path.string());
     }
 
     std::vector<std::string> args = {
@@ -349,20 +347,20 @@ void sign_apk(const std::string& APKSIGNER, const fs::path& final_apk,
     }
 
     args.push_back(aligned_apk.string());
-    run_func(args, "Signing failed");
+    run_func(args, "ApkSigner runtime verification tracking block dropped fatal signature errors.");
 
     if (fs::exists(aligned_apk)) fs::remove(aligned_apk);
 }
 
 std::pair<std::string, std::string> handle_debug_keystore() {
     const char* home_env = std::getenv("HOME");
-    if (!home_env) throw std::runtime_error("HOME environment variable not set.");
+    if (!home_env) throw std::runtime_error("System workspace parameter trace error: HOME environment context variable drops empty tracking properties.");
     
     fs::path home = home_env;
     fs::path debug_ks = home / ".android/debug.keystore";
 
     if (!fs::exists(debug_ks)) {
-        std::cout << ">> [FINISH] Generating debug.keystore..." << std::endl;
+        UI::info("Development encryption profiles missing locally. Restoring default debug.keystore structural maps...");
         fs::create_directories(debug_ks.parent_path());
         
         std::string cmd = "keytool -genkey -v -keystore " + debug_ks.string() + 
@@ -371,7 +369,7 @@ std::pair<std::string, std::string> handle_debug_keystore() {
                           "-dname \"CN=Android Debug,O=Android,C=US\"";
         
         int ret = std::system(cmd.c_str());
-        if (ret != 0) std::cerr << "!! Warning: Keytool generation failed." << std::endl;
+        if (ret != 0) UI::warn("Stand-alone keytool profile certificate automated creation routines returned execution tracking warning anomalies.");
     }
     return {debug_ks.string(), "androiddebugkey"};
 }
