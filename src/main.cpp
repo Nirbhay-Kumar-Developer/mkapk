@@ -6,6 +6,7 @@
 #include <sstream>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
 
@@ -18,7 +19,7 @@ private:
     std::streambuf* orig_buf;
     std::string line_buffer;
     
-     int sequence_state = 0;
+    int sequence_state = 0;
     std::vector<std::string> buffered_lines;
 
     const std::vector<std::string> TARGET_SEQUENCE = {
@@ -42,19 +43,15 @@ protected:
         if (c == EOF) return EOF;
 
         if (c == '\n') {
-            // Check if the current line matches the expected step in our 4-line block
             if (sequence_state < 4 && line_buffer == TARGET_SEQUENCE[sequence_state]) {
                 buffered_lines.push_back(line_buffer);
                 sequence_state++;
 
-                // If we hit exactly 4 consecutive lines matching perfectly, discard them completely
                 if (sequence_state == 4) {
                     buffered_lines.clear();
                     sequence_state = 0;
                 }
             } else {
-                // Sequence broken! This is a real error or an unrelated warning.
-                // Store the current line, flush everything we held, and write it out.
                 buffered_lines.push_back(line_buffer);
                 flush_held_lines();
             }
@@ -83,41 +80,39 @@ public:
 };
 
 void show_help() {
-    std::cout << R"(
-mkapk - A lightweight Android Build Tool
-Usage: mkapk [command] [options]
-
-Commands:
-  init          Initialize a new project structure from templates.
-  build         Build the project (defaults to an incremental Debug build).
-  clean         Remove build artifacts (keeps keystores).
-  install <pl>  Unpack and install a signed language plugin package (.pl).
-  uninstall <n> Remove a language plugin configuration and its footprint cache.
-  help          Show this help menu.
-
-Options:
-  -release      Build a production-ready package with optimizations and obfuscation.
-  -all          Force a complete rebuild from scratch.
-  -no-obs       Disable obfuscation when building in release mode.
-  -arch <abi>   Target specific architecture (e.g., aarch64, armv7a, x86_64) or 'universal' / 'u'.
-  -ndk-all      Generate split architecture APKs along with a universal standalone package.
-    )" << std::endl;
+    std::lock_guard<std::mutex> lock(UI::get_console_mutex());
+    std::cout << UI::BOLD << "mkapk" << UI::RESET << " - A lightweight Android Build Tool\n"
+              << UI::CYAN << "Usage:" << UI::RESET << " mkapk [command] [options]\n\n"
+              << UI::CYAN << "Commands:\n" << UI::RESET
+              << "  init          Initialize a new project structure from templates.\n"
+              << "  build         Build the project (defaults to an incremental Debug build).\n"
+              << "  clean         Remove build artifacts (keeps keystores).\n"
+              << "  install <pl>  Unpack and install a signed language plugin package (.pl).\n"
+              << "  uninstall <n> Remove a language plugin configuration and its footprint cache.\n"
+              << "  help          Show this help menu.\n\n"
+              << UI::CYAN << "Options:\n" << UI::RESET
+              << "  -release      Build a production-ready package with optimizations and obfuscation.\n"
+              << "  -all          Force a complete rebuild from scratch.\n"
+              << "  -no-obs       Disable obfuscation when building in release mode.\n"
+              << "  -arch <abi>   Target specific architecture (e.g., aarch64, armv7a, x86_64) or 'universal' / 'u'.\n"
+              << "  -ndk-all      Generate split architecture APKs along with a universal standalone package.\n"
+              << std::endl;
 }
 
 bool clean_bin_directory() {
     fs::path bin_path = "bin";
 
     if (!fs::exists(bin_path)) {
-        std::cout << ">> 'bin/' directory does not exist. Nothing to clean." << std::endl;
+        UI::info("Directory 'bin/' does not exist. Nothing to clean.");
         return true;
     }
 
     if (!fs::is_directory(bin_path)) {
-        std::cerr << "!! Error: 'bin' exists but is not a directory." << std::endl;
+        UI::error("Target path 'bin' exists but is not a directory.");
         return false;
     }
 
-    std::cout << ">> Cleaning 'bin/' directory (preserving keystores)..." << std::endl;
+    UI::info(UI::Msg::CLEAN_START);
     size_t deleted_count = 0;
 
     try {
@@ -130,17 +125,16 @@ bool clean_bin_directory() {
             }
             deleted_count += fs::remove_all(entry.path());
         }
-        std::cout << "✨ Clean finished successfully. Removed " << deleted_count << " item(s)." << std::endl;
+        UI::success(UI::Msg::CLEAN_SUCCESS + " Removed " + std::to_string(deleted_count) + " item(s).");
         return true;
     } 
     catch (const fs::filesystem_error& e) {
-        std::cerr << "!! Filesystem error during clean: " << e.what() << std::endl;
+        UI::error("Filesystem error during directory sweep.", e.what());
         return false;
     }
 }
 
 int main(int argc, char* argv[]) {
-    // Redirect std::cerr safely through our sequential state-machine filter
     std::streambuf* old_cerr_buf = std::cerr.rdbuf();
     JavaWarningFilterBuf filter_buf(old_cerr_buf);
     std::cerr.rdbuf(&filter_buf);
@@ -157,12 +151,9 @@ int main(int argc, char* argv[]) {
 
     try {
         if (command == "init") {
-            if (MkapkEnv::init_project()) {
-                std::cerr.rdbuf(old_cerr_buf);
-                return 0;
-            }
+            bool success = MkapkEnv::init_project();
             std::cerr.rdbuf(old_cerr_buf);
-            return 1;
+            return success ? 0 : 1;
         }
 
         if (command == "clean") {
@@ -171,10 +162,9 @@ int main(int argc, char* argv[]) {
             return success ? 0 : 1;
         }
 
-        // --- EXTENSIBLE INTERCEPTOR PLUGIN ROUTER CHANNELS ---
         if (command == "install") {
             if (args.size() < 2) {
-                std::cerr << "!! Error: Missing target package path token. Usage: mkapk install <plugin.pl>" << std::endl;
+                UI::error("Missing target package path token. Usage: mkapk install <plugin.pl>");
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
@@ -185,7 +175,7 @@ int main(int argc, char* argv[]) {
 
         if (command == "uninstall") {
             if (args.size() < 2) {
-                std::cerr << "!! Error: Missing target language handle name. Usage: mkapk uninstall <plugin_name>" << std::endl;
+                UI::error("Missing target language handle name. Usage: mkapk uninstall <plugin_name>");
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
@@ -201,8 +191,7 @@ int main(int argc, char* argv[]) {
 
             std::string config_content = MkapkEnv::read_config_file();
             if (config_content.empty()) {
-                std::cerr << "!! Error: Configuration file 'config.json' not found." << std::endl;
-                std::cerr << "   Run 'mkapk init' to generate a template." << std::endl;
+                UI::error(UI::Msg::CONFIG_MISSING);
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
@@ -210,57 +199,57 @@ int main(int argc, char* argv[]) {
             bool is_release = std::find(args.begin(), args.end(), "-release") != args.end();
             bool ndk_all = std::find(args.begin(), args.end(), "-ndk-all") != args.end();
             
-            // Look up flag values safely to avoid splitting parameter bindings apart
             std::string arch_target = "";
             auto arch_it = std::find(args.begin(), args.end(), "-arch");
             if (arch_it != args.end() && (arch_it + 1) != args.end()) {
                 arch_target = *(arch_it + 1);
             }
 
-            std::cout << ">> Starting " << (is_release ? "Release" : "Debug") << " Build";
+            // Create context meta details variant layout dynamically
+            std::string build_details = is_release ? "Release Mode" : "Debug Mode";
             if (ndk_all) {
-                std::cout << " [Multi-ABI Output Mode]";
+                build_details += ", Multi-ABI Output";
             } else if (!arch_target.empty()) {
-                std::cout << " [Target ABI: " << arch_target << "]";
+                build_details += ", ABI: " + arch_target;
             }
-            std::cout << "..." << std::endl;
+
+            UI::stage(UI::Msg::BUILD_START, build_details);
             
             std::string daemon_classpath = MkapkEnv::get_jni_classpath(config_content);
             start_daemon(daemon_classpath); 
             
             try {
-                // Passes unmodified vector array retaining custom architecture options safely
                 std::string result = perform_build(args, config_content);
                 stop_daemon();
 
                 if (result == "up-to-date") {
-                    std::cout << "\n✅ Build finished: Project is already up-to-date." << std::endl;
+                    UI::success(UI::Msg::BUILD_UP_TO_DATE, "");
                 } else {
-                    std::cout << "\n✨ mkapk: Build finished successfully." << std::endl;
-                    std::cout << ">> Output: " << result << std::endl;
+                    UI::success(UI::Msg::BUILD_SUCCESS);
+                    UI::info("Artifact Location: " + result);
                 }
             } 
             catch (const std::exception& build_err) {
                 stop_daemon();
-                std::cerr << "\n!! Build Interrupted: " << build_err.what() << std::endl;
+                UI::error("Build pipeline run interrupted.", build_err.what());
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1; 
             } 
             catch (...) {
                 stop_daemon();
-                std::cerr << "\n!! Build Interrupted: A fatal internal error occurred." << std::endl;
+                UI::error(UI::Msg::FATAL_INTERNAL);
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
         } 
         else {
-            std::cerr << "!! Unknown command: '" << command << "'. Use 'mkapk help'." << std::endl;
+            UI::error("Unknown execution instruction command sequence: '" + command + "'. Use 'mkapk help'.");
             std::cerr.rdbuf(old_cerr_buf);
             return 1;
         }
     } 
     catch (const std::exception& e) {
-        std::cerr << "\n!! mkapk terminal error: " << e.what() << std::endl;
+        UI::error("Fatal system failure boundary level broken.", e.what());
         std::cerr.rdbuf(old_cerr_buf);
         return 1;
     }

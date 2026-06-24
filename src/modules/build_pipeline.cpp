@@ -8,6 +8,7 @@
 #include <functional>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
 
@@ -82,7 +83,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
     // WORKER THREAD A: Resource Compilation & Base Layout Processing
     auto resource_worker = std::async(std::launch::async, [&]() {
         if (resources_triggered) {
-            std::cout << ">> [ASYNC-STAGE] Processing Resource Channels..." << std::endl;
+            UI::stage(UI::Msg::RES_STAGE, "Processing resource channels");
             compile_resources(tools["aapt2"], res_dir, bin_dir, run_func, 
                              (diff.res_changed && !force_all) ? &diff.changed_resources : nullptr);
 
@@ -94,10 +95,9 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
     // WORKER THREAD B: Multi-Threaded Native ABI Compiler Pipelines
     auto native_worker = std::async(std::launch::async, [&]() {
         if (!diff.changed_files["native"].empty() || force_all) {
-            std::cout << ">> [ASYNC-STAGE] Processing Native Compilation Matrix..." << std::endl;
+            UI::stage(UI::Msg::NATIVE_STAGE, "Compiling multi-architecture variants");
             
             // 1. Parse the explicit targets array from config data
-            // (Ensure MkapkEnv maps this directly to your inner JSON configuration object router parsing keys)
             std::vector<NativeTargetConfig> targets = MkapkEnv::parse_json_native_targets(config_content);
 
             // 2. FIXED: Forwarding 'targets' as the 8th parameter to fully satisfy native.cpp rules
@@ -117,17 +117,17 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
     // WORKER THREAD C: Unified JVM Source Compilation & Cascaded Dexing
     auto jvm_worker = std::async(std::launch::async, [&]() {
         if (diff.src_changed || force_all) {
-            std::cout << ">> [ASYNC-STAGE] Processing Source Pipelines..." << std::endl;
+            UI::stage("Source Pipeline", "Analyzing active code changes");
         }
         auto [java_out, dex_cache] = compile_source_logic(config_content, tools, active_plugins, android_jar, bin_dir, 
                                                         diff.changed_files, diff.deleted_files, 
                                                         (diff.res_changed || force_all), run_func);
 
         if (is_release) {
-            std::cout << ">> [ASYNC-STAGE] Running R8 bytecode optimization..." << std::endl;
+            UI::stage("Minification", "Running R8 bytecode optimization");
             run_dex_r8(tools["r8"], android_jar, config_content, bin_dir, run_func);
         } else {
-            std::cout << ">> [ASYNC-STAGE] Running D8 incremental dexing..." << std::endl;
+            UI::stage("Dexing", "Running D8 incremental translation");
             std::vector<fs::path> unified_dex_targets;
             for (const auto& [lang, files] : diff.changed_files) {
                 auto plug_it = active_plugins.find("." + lang);
@@ -152,12 +152,12 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
     // ============================================================================
     // MULTI-APK PACKAGING ITERATION LOOP (Runs on Main Thread)
     // ============================================================================
-    std::cout << ">> [MAIN-THREAD] All compilation gates passed. Starting assembly matrix..." << std::endl;
+    UI::info("All concurrent compilation tracks synchronization barriers cleared.");
 
     fs::path base_unsigned_apk = bin_dir / "unsigned.apk";
     
     if (!resources_triggered && !fs::exists(base_unsigned_apk)) {
-        std::cout << ">> [MAIN-THREAD] Warning: Base unsigned container missing. Regenerating link tables..." << std::endl;
+        UI::warn("Base container container missing. Forcing resource link pass resolution...");
         link_manifest(tools["aapt2"], base_unsigned_apk, android_jar, manifest_path, bin_dir, src_dir, run_func, !is_release);
     }
 
@@ -185,7 +185,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
     std::string dynamic_ret_path = "";
 
     for (const auto& task : package_matrix) {
-        std::cout << ">> [PACK] Assembling variant " << task.filename_suffix << "..." << std::endl;
+        UI::stage(UI::Msg::PACK_STAGE, "Variant target: " + task.filename_suffix);
         
         fs::path loop_unsigned = bin_dir / ("unsigned" + task.filename_suffix + ".apk");
         fs::copy_file(base_unsigned_apk, loop_unsigned, fs::copy_options::overwrite_existing);
@@ -195,6 +195,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
         fs::path aligned_apk = align_apk(tools["zipalign"], "4", loop_unsigned, bin_dir, run_func);
         fs::path final_apk = bin_dir / (proj_name + task.filename_suffix + ".apk");
         
+        UI::stage(UI::Msg::SIGN_STAGE, final_apk.filename().string());
         sign_apk(tools["apksigner"], final_apk, aligned_apk, ks_info.first, ks_info.second, run_func);
         
         if (fs::exists(loop_unsigned)) fs::remove(loop_unsigned);
@@ -204,5 +205,5 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
     }
 
     save_state(bin_dir, new_state, is_release);
-    return ndk_all ? "Split architecture compilation matrix generated inside: " + bin_dir.string() : dynamic_ret_path;
+    return ndk_all ? "Split architecture packaging structural distribution layout written within: " + bin_dir.string() : dynamic_ret_path;
 }

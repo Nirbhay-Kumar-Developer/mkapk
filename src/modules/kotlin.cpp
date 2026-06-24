@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <functional>
 #include "mkapk_helpers.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
 
@@ -22,8 +23,7 @@ bool compile_incremental_kotlin(
 {
     if (changed_files.empty()) return true;
 
-    // Match Python print output
-    std::cout << ">> [KOTLIN] Compiling " << changed_files.size() << " changed files..." << std::endl;
+    UI::stage(UI::Msg::KOTLIN_STAGE, "Compiling " + std::to_string(changed_files.size()) + " changed files");
     
     // Equivalent to classes_dir.mkdir(parents=True)
     fs::create_directories(classes_dir);
@@ -84,11 +84,11 @@ bool compile_incremental_kotlin(
         f.close();
         args.push_back("@" + sources_list_file.string());
     } else {
-        std::cerr << "!! Error: Could not create sources list file." << std::endl;
+        UI::error("Could not write intermediate compilation argument routing maps.", sources_list_file.string());
         return false;
     }
 
-    // 5. Execute via JNI/Backend
+    // 5. Execute via JVM/Backend
     run_func(args, "Kotlin compilation (kotlinc) failed");
     return true;
 }
@@ -107,7 +107,7 @@ bool compile_kotlin(
 {
     std::vector<fs::path> kt_files;
     if (!fs::exists(src_dir)) {
-        std::cerr << "!! Kotlin source directory missing: " << src_dir << std::endl;
+        UI::error("Kotlin workspace tracking directory missing from context layout", src_dir.string());
         return false;
     }
 
