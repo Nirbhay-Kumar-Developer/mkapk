@@ -144,6 +144,8 @@ namespace MkapkEnv {
         fs::path d8_jar = sdk_root / "cmdline-tools/latest/lib/d8-classpath.jar";
         
         fs::path resguard_jar = resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
+        
+        fs::path kotlin_preloader = "/data/data/com.termux/files/usr/opt/kotlin/lib/kotlin-preloader.jar";
 
         std::vector<std::string> cp_entries;
         
@@ -159,6 +161,9 @@ namespace MkapkEnv {
         if (fs::exists(d8_jar)) cp_entries.push_back(d8_jar.string());
 
         if (fs::exists(resguard_jar)) cp_entries.push_back(resguard_jar.string());
+        
+        if (fs::exists(kotlin_preloader)) cp_entries.push_back(kotlin_preloader.string());
+        else UI::error("Kotlin Compiler installation not found at standard path");
 
         std::string full_cp = "";
         for (size_t i = 0; i < cp_entries.size(); ++i) {

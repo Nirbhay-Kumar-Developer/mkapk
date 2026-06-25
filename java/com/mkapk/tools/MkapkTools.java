@@ -5,11 +5,6 @@ import java.util.Arrays;
 import java.util.Scanner;
 import java.security.Permission;
 
-/**
- * mkapk Java Daemon - High Performance Persistent Worker
- * Permanent Fix: Bypasses JNI memory tagging issues by running as a separate process.
- * Intercepts System.exit() to keep the JVM alive between build tasks.
- */
 public class MkapkTools {
 
     private static boolean isRunning = false;
@@ -32,10 +27,8 @@ public class MkapkTools {
                 }
             });
         } catch (UnsupportedOperationException e) {
-            // This happens on Java 18+ if the 'allow' flag is missing.
-            // We print a warning but allow the daemon to try and run anyway.
-            System.err.println("!! [DAEMON-WARN] Security Manager restricted.");
-            System.err.println("!! Ensure JVM is started with -Djava.security.manager=allow");
+            // Forward a structured warning over standard out for C++ UI parser ingestion
+            System.out.println("[WARN]|Security Manager restricted. Ensure JVM execution args include -Djava.security.manager=allow");
         }
     }
 
@@ -78,7 +71,7 @@ public class MkapkTools {
                             // Signal that the specific task (javac/d8/etc) is finished
                             System.out.println("MKAPK_TASK_DONE");
                         } else {
-                            System.err.println("!! [DAEMON] Ignore: Send START_DAEMON first.");
+                            System.out.println("[ERROR]|Disregarded command transaction. Transmission of START_DAEMON handshake verification token required first.");
                         }
                     }
                 }
@@ -91,33 +84,123 @@ public class MkapkTools {
 
     private static void handleTask(String command, String[] args) {
         boolean taskFailed = false;
+
+        // Structured buffer to intercept underlying standard console stream streams
+        ByteArrayOutputStream internalLogBuffer = new ByteArrayOutputStream();
+        PrintStream captureStream = new PrintStream(internalLogBuffer);
+
+        // Retain normal process streams references
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
+
         try {
             switch (command) {
                 case "javac" -> {
-                    int result = com.sun.tools.javac.Main.compile(args);
+                    // javac allows passing a specialized stream writer for diagnostic capturing
+                    PrintWriter logWriter = new PrintWriter(captureStream);
+                    int result = com.sun.tools.javac.Main.compile(args, logWriter);
+                    logWriter.flush();
                     if (result != 0) {
-                        System.err.println("!! [JAVAC] Compilation failed.");
                         taskFailed = true;
                     }
                 }
-                case "d8" -> com.android.tools.r8.D8.main(args);
-                case "r8" -> com.android.tools.r8.R8.main(args);
-                case "resguard" -> com.tencent.mm.resourceproguard.cli.CliMain.main(args);
-                case "apksigner" -> com.android.apksigner.ApkSignerTool.main(args);
-                default -> System.err.println("!! [DAEMON] Unknown tool: " + command);
+                case "d8" -> {
+                    System.setOut(captureStream);
+                    System.setErr(captureStream);
+                    com.android.tools.r8.D8.main(args);
+                }
+                case "r8" -> {
+                    System.setOut(captureStream);
+                    System.setErr(captureStream);
+                    com.android.tools.r8.R8.main(args);
+                }
+                case "resguard" -> {
+                    System.setOut(captureStream);
+                    System.setErr(captureStream);
+                    com.tencent.mm.resourceproguard.cli.CliMain.main(args);
+                }
+                case "apksigner" -> {
+                    System.setOut(captureStream);
+                    System.setErr(captureStream);
+                    com.android.apksigner.ApkSignerTool.main(args);
+                }
+                case "kotlinc" -> {
+                    // Query localized context environment properties dynamically
+                    String termuxPrefix = System.getenv("PREFIX");
+                    if (termuxPrefix == null) {
+                        termuxPrefix = "/data/data/com.termux/files/usr";
+                    }
+
+                    // Traverse paths matching your target cross-compiler installation root folder layout
+                    String kotlinHome = termuxPrefix + "/opt/kotlin";
+
+                    String compilerJar = kotlinHome + "/lib/kotlin-compiler.jar";
+                    String compilerClass = "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler";
+
+                    // Reconstruct the exact argument structure expected by the Kotlin Preloader:
+                    String[] preloaderArgs = new String[3 + args.length];
+                    preloaderArgs[0] = "-cp";
+                    preloaderArgs[1] = compilerJar;
+                    preloaderArgs[2] = compilerClass;
+                    System.arraycopy(args, 0, preloaderArgs, 3, args.length);
+
+                    // Redirect system execution streams to our diagnostic logs capture buffer
+                    System.setOut(captureStream);
+                    System.setErr(captureStream);
+                    
+                    try {
+                        // Invoke Kotlin's Preloader entry point directly
+                        org.jetbrains.kotlin.preloading.Preloader.main(preloaderArgs);
+                    } finally {
+                        // Restore straight to original references to guard IPC daemon boundary stability
+                        System.setOut(originalOut);
+                        System.setErr(originalErr);
+                    }
+                }
+                default -> {
+                    System.out.println("[ERROR]|Unknown system tool execution target requested: " + command);
+                    taskFailed = true;
+                }
             }
         } catch (SecurityException e) {
             // Intercepted exit from D8/R8 indicating an execution failure
             if (e.getMessage().contains("Intercepted System.exit")) {
                 taskFailed = true;
             } else {
-                e.printStackTrace();
+                System.setOut(originalOut);
+                System.setErr(originalErr);
+                System.out.println("[ERROR]|Daemon tracking caught security isolation exception validation fault: " + e.getMessage());
                 taskFailed = true;
             }
         } catch (Throwable t) {
-            System.err.println("!! [DAEMON] Task failure in " + command + ": " + t.getMessage());
-            t.printStackTrace();
+            System.setOut(originalOut);
+            System.setErr(originalErr);
+            System.out.println("[ERROR]|Task compilation pipeline crash monitored within " + command + ": " + t.getMessage());
+            t.printStackTrace(captureStream);
             taskFailed = true;
+        } finally {
+            // Restore standard pipeline outputs safely to preserve daemon protocol stability
+            System.setOut(originalOut);
+            System.setErr(originalErr);
+        }
+
+        // Process and transmit captured compiler error outputs line by line
+        String rawDiagnostics = internalLogBuffer.toString();
+        if (!rawDiagnostics.isEmpty()) {
+            String[] diagnosticLines = rawDiagnostics.split("\\r?\\n");
+            for (String diagnosticLine : diagnosticLines) {
+                String trimmedLine = diagnosticLine.trim();
+                if (trimmedLine.isEmpty()) continue;
+
+                // SQUELCH JANSI NOISE FROM CAPTURED COMPILER STREAMS
+                if (trimmedLine.contains("jansi") || 
+                    trimmedLine.contains("libjansi") || 
+                    trimmedLine.contains("UnsatisfiedLinkError")) {
+                    continue;
+                }
+
+                System.out.println("[ERROR]|" + trimmedLine);
+            }
         }
 
         // Trigger SIGKILL to parent if things went south
@@ -132,7 +215,8 @@ public class MkapkTools {
     private static void killParentProcess() {
         ProcessHandle.current().parent().ifPresent(parent -> {
             long ppid = parent.pid();
-            System.err.println("!! [DAEMON-FATAL] Tool error/crash detected. Force-killing PPID: " + ppid);
+            System.out.println("[ERROR]|Fatal runtime operation drop flags caught inside daemon tools. Forcing parent process tree breakdown: " + ppid);
+            System.out.flush();
             
             try {
                 String os = System.getProperty("os.name").toLowerCase();
@@ -150,7 +234,7 @@ public class MkapkTools {
                 pb.start();
                 
             } catch (IOException e) {
-                System.err.println("!! [DAEMON] Failed to issue kill command to PPID: " + e.getMessage());
+                // Parent already inaccessible
             }
         });
     }
