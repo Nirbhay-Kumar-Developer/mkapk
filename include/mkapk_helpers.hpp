@@ -8,6 +8,7 @@
 #include <functional>
 #include <utility>
 #include "mkapk_tools.hpp"
+#include "mkapk_ui.hpp"
 #include <sys/wait.h>
 #include <unistd.h>
 

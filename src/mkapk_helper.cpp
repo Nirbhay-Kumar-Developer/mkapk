@@ -59,6 +59,7 @@ void start_daemon(const std::string& classpath) {
              throw std::runtime_error("System write synchronization failed on JVM entry command.");
         }
 
+        // --- UPDATED ERROR SQUELCH FILTER SEQUENCES ---
         const std::vector<std::string> TARGET_SEQUENCE = {
             "WARNING: A terminally deprecated method in java.lang.System has been called",
             "WARNING: System::setSecurityManager has been called by com.mkapk.tools.MkapkTools (file:/data/data/com.termux/files/usr/share/mkapk/mkapk-coordinator.jar)",
@@ -72,6 +73,14 @@ void start_daemon(const std::string& classpath) {
 
         auto flush_err_lines = [&]() {
             for (const auto& line : buffered_err_lines) {
+                // Inline filter step to discard the 2-line dynamic JAnsi UnsatisfiedLinkError block
+                if (line.rfind("Failed to load native library:jansi-", 0) == 0) {
+                    continue; 
+                }
+                if (line.find("java.lang.UnsatisfiedLinkError:") != std::string::npos && 
+                    line.find("libjansi.so: dlopen failed: library \"libc.so.6\" not found") != std::string::npos) {
+                    continue;
+                }
                 UI::warn("JVM Internal Trace: " + line);
             }
             buffered_err_lines.clear();
@@ -178,18 +187,25 @@ void call_java_tool(const std::vector<std::string>& args) {
 
     char buffer[4096];
     std::string line_accumulator;
-    while (true) {
+    bool task_completed = false;
+    bool in_error_block = false; // State flag to prevent repeating the Error header
+
+    while (!task_completed) {
         ssize_t n = read(pipe_from_jvm[0], buffer, sizeof(buffer) - 1);
         if (n <= 0) throw std::runtime_error("IPC connection dropped out of scope: Daemon closed channel before execution milestone reached.");
         
         buffer[n] = '\0';
         std::string resp(buffer);
         
-        if (resp.find("MKAPK_TASK_DONE") != std::string::npos) break;
+        size_t done_pos = resp.find("MKAPK_TASK_DONE");
+        if (done_pos != std::string::npos) {
+            task_completed = true;
+            resp.erase(done_pos, 15); 
+        }
 
-        // Route stdout diagnostics securely through thread-safe UI framework line by line
         line_accumulator += resp;
         size_t newline_pos;
+        
         while ((newline_pos = line_accumulator.find('\n')) != std::string::npos) {
             std::string line = line_accumulator.substr(0, newline_pos);
             line_accumulator = line_accumulator.substr(newline_pos + 1);
@@ -198,17 +214,45 @@ void call_java_tool(const std::vector<std::string>& args) {
 
             // --- INTERCEPT PROTOCOL LOGGING TAGS FROM JAVA DAEMON ---
             if (line.rfind("[ERROR]|", 0) == 0) {
-                // Route directly to UI error handler (stripping the 8-character tag)
-                UI::error(line.substr(8));
+                std::string clean_line = line.substr(8);
+                
+                if (!in_error_block) {
+                    // This is the start of the compiler error output. Call the actual UI error wrapper.
+                    UI::error(clean_line);
+                    in_error_block = true;
+                } else {
+                    // We are already inside an error block. Print the raw lines aligned underneath.
+                    std::lock_guard<std::mutex> lock(UI::get_console_mutex());
+                    std::cerr << "         " << clean_line << std::endl;
+                }
             } 
             else if (line.rfind("[WARN]|", 0) == 0) {
-                // Route directly to UI warning handler (stripping the 7-character tag)
+                in_error_block = false; // Reset block state if a warning interrupts
                 UI::warn(line.substr(7));
             } 
             else {
-                // Fallback for general underlying tool standard output streams (d8, r8, apksigner, etc.)
+                in_error_block = false; // Reset block state on standard logs
                 UI::info("[" + args[0] + " stdout] " + line);
             }
+        }
+    }
+
+    // Flush any trailing fragments remaining inside the accumulator
+    if (!line_accumulator.empty() && line_accumulator.find_first_not_of(" \t\r\n") != std::string::npos) {
+        if (line_accumulator.rfind("[ERROR]|", 0) == 0) {
+            std::string clean_line = line_accumulator.substr(8);
+            if (!in_error_block) {
+                UI::error(clean_line);
+            } else {
+                std::lock_guard<std::mutex> lock(UI::get_console_mutex());
+                std::cerr << "         " << clean_line << std::endl;
+            }
+        } 
+        else if (line_accumulator.rfind("[WARN]|", 0) == 0) {
+            UI::warn(line_accumulator.substr(7));
+        } 
+        else {
+            UI::info("[" + args[0] + " stdout] " + line_accumulator);
         }
     }
 }
@@ -222,7 +266,7 @@ void smart_run(const std::vector<std::string>& args, const std::string& err_msg)
     std::string tool_name = fs::path(args[0]).filename().string();
     bool use_daemon = (tool_name == "d8" || tool_name == "r8" || 
                        tool_name == "javac" || tool_name == "resguard" ||
-                       tool_name == "apksigner");
+                       tool_name == "apksigner" || tool_name == "kotlinc");
 
     if (use_daemon) {
         std::vector<std::string> daemon_args = args;
