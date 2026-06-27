@@ -9,6 +9,7 @@
 #include <utility>
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
+#include "mkapk_config.hpp"
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -28,14 +29,12 @@ using RunFunc = std::function<void(const std::vector<std::string>&, const std::s
  * ============================================================================
  */
 namespace MkapkEnv {
-    std::string get_json_val(const std::string& key, const std::string& json_content);
     fs::path resolve_path(std::string path_str);
-    fs::path get_android_jar(const std::string& config_content);
-    std::string read_config_file();
-    std::string get_tool_path(const std::string& name, const std::string& config_content);
-    std::map<std::string, std::string> get_tools_map(const std::string& config_content);
-    std::string get_jni_classpath(const std::string& config_content);
-    std::vector<NativeTargetConfig> parse_json_native_targets(const std::string& config_content);
+    fs::path get_android_jar(MkapkConfig& config);
+    std::string get_tool_path(const std::string& name, MkapkConfig& config);
+    std::filesystem::path get_android_jar(const MkapkConfig& config);
+    std::map<std::string, std::string> get_tools_map(const MkapkConfig& config);
+    std::string get_jni_classpath(const MkapkConfig& config);
     bool init_project();
 
     // --- EXTENSIBLE PACKAGE MANAGEMENT PLUGIN FRAMEWORK SYSTEM ---
@@ -52,8 +51,9 @@ namespace MkapkEnv {
     bool uninstall_plugin(const std::string& plugin_name);
 
     /**
-     * Scans and initializes the active collection of LanguagePlugin objects from cache directory files.
+     * Scans and initializes the active collection of LanguagePlugin objects from cache directory files
      */
+     bool run_system_cmd(const std::vector<std::string>& args);
     std::map<std::string, LanguagePlugin> load_installed_plugins();
 }
 
@@ -80,7 +80,7 @@ void run_incremental_dex(
 );
 
 std::pair<fs::path, fs::path> compile_source_logic(
-    const std::string& config_content,
+    const MkapkConfig& config,
     std::map<std::string, std::string>& tools,
     const std::map<std::string, LanguagePlugin>& active_plugins,
     const fs::path& android_jar,
@@ -103,13 +103,12 @@ void call_java_tool(const std::vector<std::string>& args);
 void smart_run(const std::vector<std::string>& args, const std::string& err_msg);
 
 void auto_place_system_libraries(
-    const std::string& config_content, 
+    const MkapkConfig& config, 
     const fs::path& bin_dir, 
     const std::vector<std::string>& arch_list
 );
 
-std::string perform_build(const std::vector<std::string>& raw_args, const std::string& config_content);
-
+std::string perform_build(const std::vector<std::string>& raw_args, const MkapkConfig& config);
 
 /**
  * ============================================================================
@@ -119,7 +118,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
 
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
     const fs::path& bin_dir, 
-    const std::string& config_content, 
+    const MkapkConfig& config, 
     bool force_all,
     bool is_release
 );

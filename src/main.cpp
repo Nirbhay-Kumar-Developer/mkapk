@@ -189,8 +189,9 @@ int main(int argc, char* argv[]) {
                 args.erase(args.begin());
             }
 
-            std::string config_content = MkapkEnv::read_config_file();
-            if (config_content.empty()) {
+            // LOAD CONFIGURATION STRUCT
+            MkapkConfig config = MkapkEnv::load_config();
+            if (!config.is_valid) {
                 UI::error(UI::Msg::CONFIG_MISSING);
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
@@ -215,11 +216,13 @@ int main(int argc, char* argv[]) {
 
             UI::stage(UI::Msg::BUILD_START, build_details);
             
-            std::string daemon_classpath = MkapkEnv::get_jni_classpath(config_content);
+            // PASS CONFIG STRUCT TO HELPERS
+            std::string daemon_classpath = MkapkEnv::get_jni_classpath(config);
             start_daemon(daemon_classpath); 
             
             try {
-                std::string result = perform_build(args, config_content);
+                // PASS CONFIG STRUCT TO BUILD PIPELINE
+                std::string result = perform_build(args, config);
                 stop_daemon();
 
                 if (result == "up-to-date") {

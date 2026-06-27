@@ -4,6 +4,7 @@
 #include <string>
 #include <iostream>
 #include <mutex>
+#include <memory>
 
 namespace UI {
     // 1. ANSI COLOR CODES
@@ -40,40 +41,122 @@ namespace UI {
         const std::string FATAL_INTERNAL   = "A fatal internal compilation error occurred.";
     }
 
-    // 3. THREAD-SAFE CENTRALISED OUTPUT ENGINE
-     inline std::mutex& get_console_mutex() {
-        static std::mutex console_mutex;
-        return console_mutex;
+    // ============================================================================
+    // 3. CORE LOGGER INTERFACE
+    // ============================================================================
+    class ILogger {
+    public:
+        virtual ~ILogger() = default;
+        virtual void info(const std::string& message) = 0;
+        virtual void stage(const std::string& stage_name, const std::string& details = "") = 0;
+        virtual void success(const std::string& message, const std::string& prefix = "✨ ") = 0;
+        virtual void warn(const std::string& message) = 0;
+        virtual void error(const std::string& message, const std::string& details = "") = 0;
+        
+        // Required for legacy stream injections (e.g., direct std::cerr manipulation)
+        virtual std::mutex& get_console_mutex() = 0; 
+    };
+
+    // ============================================================================
+    // 4. CONCRETE CONSOLE IMPLEMENTATION
+    // ============================================================================
+    class ConsoleLogger : public ILogger {
+    private:
+        // Mutex is now safely bound to the object instance, preventing SIOF crashes.
+        std::mutex console_mutex;
+
+    public:
+        void info(const std::string& message) override {
+            std::lock_guard<std::mutex> lock(console_mutex);
+            std::cout << CYAN << "• " << RESET << message << std::endl;
+        }
+
+        void stage(const std::string& stage_name, const std::string& details = "") override {
+            std::lock_guard<std::mutex> lock(console_mutex);
+            std::cout << BLUE << "» " << RESET << BOLD << stage_name << RESET;
+            if (!details.empty()) std::cout << " (" << details << ")";
+            std::cout << "..." << std::endl;
+        }
+
+        void success(const std::string& message, const std::string& prefix = "✨ ") override {
+            std::lock_guard<std::mutex> lock(console_mutex);
+            std::cout << GREEN << prefix << BOLD << message << RESET << std::endl;
+        }
+
+        void warn(const std::string& message) override {
+            std::lock_guard<std::mutex> lock(console_mutex);
+            std::clog << YELLOW << "⚠️  Warning: " << RESET << message << std::endl;
+        }
+
+        void error(const std::string& message, const std::string& details = "") override {
+            std::lock_guard<std::mutex> lock(console_mutex);
+            std::cerr << RED << "✘ Error: " << RESET << BOLD << message << RESET << std::endl;
+            if (!details.empty()) {
+                std::cerr << RED << "  Details: " << RESET << details << std::endl;
+            }
+        }
+
+        std::mutex& get_console_mutex() override {
+            return console_mutex;
+        }
+    };
+
+    // ============================================================================
+    // 5. LOGGER MANAGER (Service Locator / Singleton)
+    // ============================================================================
+    class LoggerManager {
+    private:
+        ILogger* active_logger;
+        ConsoleLogger default_logger;
+
+        // Private constructor initializes with standard console output safely
+        LoggerManager() : active_logger(&default_logger) {}
+
+    public:
+        // Mayer's Singleton: Thread-safe and guarantees safe initialization order
+        static LoggerManager& get() {
+            static LoggerManager instance;
+            return instance;
+        }
+
+        // Allows you to dynamically swap the logger to a GUI or File logger later
+        void set_logger(ILogger* new_logger) {
+            if (new_logger) active_logger = new_logger;
+        }
+
+        ILogger& logger() {
+            return *active_logger;
+        }
+    };
+
+    // ============================================================================
+    // 6. BACKWARD COMPATIBILITY FORWARDERS
+    // ============================================================================
+    // These inline functions bridge all existing UI:: calls in the codebase 
+    // seamlessly to the actively managed logger.
+
+    inline std::mutex& get_console_mutex() {
+        return LoggerManager::get().logger().get_console_mutex();
     }
 
     inline void info(const std::string& message) {
-        std::lock_guard<std::mutex> lock(get_console_mutex());
-        std::cout << CYAN << "• " << RESET << message << std::endl;
+        LoggerManager::get().logger().info(message);
     }
 
     inline void stage(const std::string& stage_name, const std::string& details = "") {
-        std::lock_guard<std::mutex> lock(get_console_mutex());
-        std::cout << BLUE << "» " << RESET << BOLD << stage_name << RESET;
-        if (!details.empty()) std::cout << " (" << details << ")";
-        std::cout << "..." << std::endl;
+        LoggerManager::get().logger().stage(stage_name, details);
     }
 
     inline void success(const std::string& message, const std::string& prefix = "✨ ") {
-        std::lock_guard<std::mutex> lock(get_console_mutex());
-        std::cout << GREEN << prefix << BOLD << message << RESET << std::endl;
+        LoggerManager::get().logger().success(message, prefix);
     }
 
     inline void warn(const std::string& message) {
-        std::lock_guard<std::mutex> lock(get_console_mutex());
-        std::clog << YELLOW << "⚠️  Warning: " << RESET << message << std::endl;
+        LoggerManager::get().logger().warn(message);
     }
 
     inline void error(const std::string& message, const std::string& details = "") {
-        std::lock_guard<std::mutex> lock(get_console_mutex());
-        std::cerr << RED << "✘ Error: " << RESET << BOLD << message << RESET << std::endl;
-        if (!details.empty()) {
-            std::cerr << RED << "  Details: " << RESET << details << std::endl;
-        }
+        LoggerManager::get().logger().error(message, details);
     }
 }
 
