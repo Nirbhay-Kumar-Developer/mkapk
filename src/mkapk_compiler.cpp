@@ -10,6 +10,7 @@
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
+#include "mkapk_config.hpp"
 
 namespace fs = std::filesystem;
 
@@ -92,7 +93,7 @@ void execute_plugin_compiler(
  * UPDATED: Resolves circular Kotlin -> Java dependencies through unified Joint-Compilation.
  */
 std::pair<fs::path, fs::path> compile_source_logic(
-    const std::string& config_content,
+    const MkapkConfig& config,
     std::map<std::string, std::string>& tools,
     const std::map<std::string, LanguagePlugin>& active_plugins,
     const fs::path& android_jar,
@@ -139,8 +140,7 @@ std::pair<fs::path, fs::path> compile_source_logic(
     // --- PHASE 2: JOINT KOTLIN COMPILATION STEP ---
     // Feed BOTH Kotlin paths and Java file signatures directly into kotlinc.
     if (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty()) {
-        std::string compose_plug = MkapkEnv::get_json_val("COMPOSE_PLUGIN", config_content);
-        
+        std::string compose_plug = config.compose_plugin;
         std::vector<fs::path> joint_sources = changed_files["kotlin"];
         joint_sources.insert(joint_sources.end(), unified_java_sources.begin(), unified_java_sources.end());
 
@@ -158,8 +158,8 @@ std::pair<fs::path, fs::path> compile_source_logic(
     // --- PHASE 3: CORE JVM JAVA BYTECODE GENERATION ---
     // Run default Java compilation securely via the daemon channels to finalize actual bytecode generation.
     if (changed_files.find("java") != changed_files.end() && !changed_files["java"].empty()) {
-        std::string java_ver = MkapkEnv::get_json_val("JAVA_VERSION", config_content);
-        if (java_ver.empty()) java_ver = "11";
+        std::string java_ver = config.java_version;
+        if (java_ver.empty()) java_ver = "17";
         
         UI::stage(UI::Msg::JAVA_STAGE, std::to_string(changed_files["java"].size()) + " files total");
         compile_incremental_java(java_ver, {}, fs::absolute(android_jar), fs::absolute(java_out), changed_files["java"], run);

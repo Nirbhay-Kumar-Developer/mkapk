@@ -92,10 +92,10 @@ void run_incremental_dex(const std::string& D8,
 void run_dex_r8(
     const std::string& R8_TOOL,
     const fs::path& android_jar,
-    const std::string& config_content,
+    const MkapkConfig& config,
     const fs::path& bin_dir,
     RunFunc run_func,
-    bool no_obs) 
+    bool no_obs)
 {
     std::cout << ">> [R8] Optimizing for release (Obfuscation: " << (no_obs ? "false" : "true") << ")..." << std::endl;
 
@@ -115,7 +115,7 @@ void run_dex_r8(
     };
 
     if (!no_obs) {
-        std::string pg_rules_raw = MkapkEnv::get_json_val("PROGUARD_RULES", config_content);
+        std::string pg_rules_raw = config.proguard_rules;
         if (!pg_rules_raw.empty()) {
             fs::path pg_rules = fs::absolute(MkapkEnv::resolve_path(pg_rules_raw));
             if (fs::exists(pg_rules)) {

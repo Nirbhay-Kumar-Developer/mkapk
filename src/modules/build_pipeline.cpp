@@ -9,6 +9,7 @@
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
+#include "mkapk_config.hpp"
 
 namespace fs = std::filesystem;
 
@@ -16,14 +17,14 @@ namespace fs = std::filesystem;
  * Core asynchronous master orchestration logic.
  * Handles concurrent scheduling across Resource, Native NDK, and JVM layers.
  */
-std::string perform_build(const std::vector<std::string>& raw_args, const std::string& config_content) {
+std::string perform_build(const std::vector<std::string>& raw_args, const MkapkConfig& config) {
     // 1. Setup Environment
-    std::string proj_name = MkapkEnv::get_json_val("NAME", config_content);
-    fs::path bin_dir = fs::absolute(MkapkEnv::resolve_path(MkapkEnv::get_json_val("BIN_DIR", config_content)));
-    fs::path src_dir = fs::absolute(MkapkEnv::resolve_path(MkapkEnv::get_json_val("SRC_DIR", config_content)));
-    fs::path res_dir = fs::absolute(MkapkEnv::resolve_path(MkapkEnv::get_json_val("RES_DIR", config_content)));
-    fs::path manifest_path = fs::absolute(MkapkEnv::resolve_path(MkapkEnv::get_json_val("MANIFEST", config_content)));
-    fs::path android_jar = fs::absolute(MkapkEnv::get_android_jar(config_content));
+    std::string proj_name = config.project_name;
+    fs::path bin_dir = fs::absolute(MkapkEnv::resolve_path(config.bin_dir));
+    fs::path src_dir = fs::absolute(MkapkEnv::resolve_path(config.src_dir));
+    fs::path res_dir = fs::absolute(MkapkEnv::resolve_path(config.res_dir));
+    fs::path manifest_path = fs::absolute(MkapkEnv::resolve_path(config.manifest));
+    fs::path android_jar = fs::absolute(MkapkEnv::get_android_jar(config));
 
     fs::create_directories(bin_dir);
 
@@ -38,7 +39,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
         arch_target = *(arch_it + 1);
     }
 
-    auto tools = MkapkEnv::get_tools_map(config_content);
+    auto tools = MkapkEnv::get_tools_map(config);
     std::map<std::string, LanguagePlugin> active_plugins = MkapkEnv::load_installed_plugins();
 
     RunFunc run_func = [](const std::vector<std::string>& args, const std::string& err_msg) {
@@ -46,7 +47,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
     };
 
     // 2. UPDATED: Context-Aware Isolated Change Detection Pass
-    auto [diff, new_state] = check_changes(bin_dir, config_content, force_all, is_release);
+    auto [diff, new_state] = check_changes(bin_dir, config, force_all, is_release);
     if (!diff.any_changes() && !force_all) return "up-to-date";
 
     // --- SETUP ARCHITECTURE MATRIX CONFIGURATION ---
@@ -97,20 +98,17 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
         if (!diff.changed_files["native"].empty() || force_all) {
             UI::stage(UI::Msg::NATIVE_STAGE, "Compiling multi-architecture variants");
             
-            // 1. Parse the explicit targets array from config data
-            std::vector<NativeTargetConfig> targets = MkapkEnv::parse_json_native_targets(config_content);
-
-            // 2. FIXED: Forwarding 'targets' as the 8th parameter to fully satisfy native.cpp rules
-            compile_native(MkapkEnv::get_json_val("NDK_BIN", config_content), 
+            // 1. Pass the pre-parsed native targets array directly from the config struct
+            compile_native(config.ndk_bin, 
                            src_dir, 
                            bin_dir, 
                            compile_architectures, 
-                           MkapkEnv::get_json_val("TARGET_SDK", config_content), 
+                           config.target_sdk, 
                            run_func, 
                            diff.changed_files["native"], 
-                           targets);
+                           config.native_targets);
             
-            auto_place_system_libraries(config_content, bin_dir, compile_architectures);
+            auto_place_system_libraries(config, bin_dir, compile_architectures);
         }
     });
 
@@ -119,13 +117,13 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
         if (diff.src_changed || force_all) {
             UI::stage("Source Pipeline", "Analyzing active code changes");
         }
-        auto [java_out, dex_cache] = compile_source_logic(config_content, tools, active_plugins, android_jar, bin_dir, 
+        auto [java_out, dex_cache] = compile_source_logic(config, tools, active_plugins, android_jar, bin_dir, 
                                                         diff.changed_files, diff.deleted_files, 
                                                         (diff.res_changed || force_all), run_func);
 
         if (is_release) {
             UI::stage("Minification", "Running R8 bytecode optimization");
-            run_dex_r8(tools["r8"], android_jar, config_content, bin_dir, run_func);
+            run_dex_r8(tools["r8"], android_jar, config, bin_dir, run_func);
         } else {
             UI::stage("Dexing", "Running D8 incremental translation");
             std::vector<fs::path> unified_dex_targets;
@@ -162,8 +160,8 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
     }
 
     std::pair<std::string, std::string> ks_info = is_release ? 
-        std::make_pair(MkapkEnv::resolve_path(MkapkEnv::get_json_val("KEYSTORE", config_content)).string(),
-                       MkapkEnv::get_json_val("KEYSTORE_ALIAS", config_content)) : handle_debug_keystore();
+        std::make_pair(MkapkEnv::resolve_path(config.keystore).string(),
+                       config.keystore_alias) : handle_debug_keystore();
 
     std::string profile_suffix = is_release ? ".release" : ".debug";
 
@@ -190,7 +188,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const std::s
         fs::path loop_unsigned = bin_dir / ("unsigned" + task.filename_suffix + ".apk");
         fs::copy_file(base_unsigned_apk, loop_unsigned, fs::copy_options::overwrite_existing);
 
-        inject_assets_and_dex(loop_unsigned, bin_dir, MkapkEnv::get_json_val("ASSETS_DIR", config_content), task.target_abis, is_release);
+        inject_assets_and_dex(loop_unsigned, bin_dir, config.assets_dir, task.target_abis, is_release);
 
         fs::path aligned_apk = align_apk(tools["zipalign"], "4", loop_unsigned, bin_dir, run_func);
         fs::path final_apk = bin_dir / (proj_name + task.filename_suffix + ".apk");

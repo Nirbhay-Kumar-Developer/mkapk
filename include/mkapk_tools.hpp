@@ -8,6 +8,7 @@
 #include <set>
 #include <utility>
 #include <functional>
+#include "mkapk_config.hpp"
 
 namespace fs = std::filesystem;
 
@@ -50,12 +51,6 @@ struct BuildResults {
         }
         return false;
     }
-};
-
-struct NativeTargetConfig {
-    std::string name;
-    std::vector<std::string> sources;
-    std::vector<std::string> extra_flags;
 };
 
 /**
@@ -163,7 +158,7 @@ bool compile_native(
 void run_dex_r8(
     const std::string& R8_TOOL,
     const fs::path& android_jar,
-    const std::string& config_content,
+    const MkapkConfig& config,
     const fs::path& bin_dir,
     RunFunc run_func,
     bool no_obs = false

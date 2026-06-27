@@ -9,7 +9,7 @@ JVM_LIB_PATH = $(JAVA_HOME)/lib/server
 # LDFLAGS now includes -Wl,-rpath which bakes the search path into the ELF binary
 LDFLAGS = -L$(JVM_LIB_PATH) \
           -Wl,-rpath=$(JVM_LIB_PATH) \
-          -ljvm -lcrypto -lssl -lzip -lpthread
+          -ljvm -lcrypto -lssl -lzip -lpthread -landroid-spawn
 
 # --- Directories ---
 BUILD_DIR = build

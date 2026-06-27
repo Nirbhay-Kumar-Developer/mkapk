@@ -10,6 +10,8 @@
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
+#include <poll.h>
+#include <cerrno>
 
 namespace fs = std::filesystem;
 
@@ -186,61 +188,104 @@ void call_java_tool(const std::vector<std::string>& args) {
     }
 
     char buffer[4096];
-    std::string line_accumulator;
+    std::string out_accumulator;
+    std::string err_accumulator;
     bool task_completed = false;
     bool in_error_block = false; // State flag to prevent repeating the Error header
 
+    // Setup poll descriptors for multiplexed I/O
+    struct pollfd fds[2];
+    fds[0].fd = pipe_from_jvm[0];
+    fds[0].events = POLLIN;
+    fds[1].fd = pipe_err_from_jvm[0];
+    fds[1].events = POLLIN;
+
     while (!task_completed) {
-        ssize_t n = read(pipe_from_jvm[0], buffer, sizeof(buffer) - 1);
-        if (n <= 0) throw std::runtime_error("IPC connection dropped out of scope: Daemon closed channel before execution milestone reached.");
-        
-        buffer[n] = '\0';
-        std::string resp(buffer);
-        
-        size_t done_pos = resp.find("MKAPK_TASK_DONE");
-        if (done_pos != std::string::npos) {
-            task_completed = true;
-            resp.erase(done_pos, 15); 
+        // Block until at least one pipe has data to read (or an error occurs)
+        int ret = poll(fds, 2, -1);
+        if (ret < 0) {
+            if (errno == EINTR) continue; // Safely ignore OS signal interruptions
+            throw std::runtime_error("IPC synchronization failure: poll() returned a fatal error.");
         }
 
-        line_accumulator += resp;
-        size_t newline_pos;
-        
-        while ((newline_pos = line_accumulator.find('\n')) != std::string::npos) {
-            std::string line = line_accumulator.substr(0, newline_pos);
-            line_accumulator = line_accumulator.substr(newline_pos + 1);
+        // ====================================================================
+        // CHANNEL 1: STANDARD OUTPUT (JVM Protocol & Task Flags)
+        // ====================================================================
+        if (fds[0].revents & POLLIN) {
+            ssize_t n = read(fds[0].fd, buffer, sizeof(buffer) - 1);
+            if (n <= 0) {
+                throw std::runtime_error("IPC connection dropped out of scope: Daemon closed stdout channel before execution milestone reached.");
+            }
             
-            if (line.empty()) continue;
+            buffer[n] = '\0';
+            std::string resp(buffer);
+            
+            size_t done_pos = resp.find("MKAPK_TASK_DONE");
+            if (done_pos != std::string::npos) {
+                task_completed = true;
+                resp.erase(done_pos, 15); 
+            }
 
-            // --- INTERCEPT PROTOCOL LOGGING TAGS FROM JAVA DAEMON ---
-            if (line.rfind("[ERROR]|", 0) == 0) {
-                std::string clean_line = line.substr(8);
+            out_accumulator += resp;
+            size_t newline_pos;
+            
+            while ((newline_pos = out_accumulator.find('\n')) != std::string::npos) {
+                std::string line = out_accumulator.substr(0, newline_pos);
+                out_accumulator = out_accumulator.substr(newline_pos + 1);
                 
-                if (!in_error_block) {
-                    // This is the start of the compiler error output. Call the actual UI error wrapper.
-                    UI::error(clean_line);
-                    in_error_block = true;
-                } else {
-                    // We are already inside an error block. Print the raw lines aligned underneath.
-                    std::lock_guard<std::mutex> lock(UI::get_console_mutex());
-                    std::cerr << "         " << clean_line << std::endl;
+                if (line.empty()) continue;
+
+                // --- INTERCEPT PROTOCOL LOGGING TAGS FROM JAVA DAEMON ---
+                if (line.rfind("[ERROR]|", 0) == 0) {
+                    std::string clean_line = line.substr(8);
+                    
+                    if (!in_error_block) {
+                        UI::error(clean_line);
+                        in_error_block = true;
+                    } else {
+                        std::lock_guard<std::mutex> lock(UI::get_console_mutex());
+                        std::cerr << "         " << clean_line << std::endl;
+                    }
+                } 
+                else if (line.rfind("[WARN]|", 0) == 0) {
+                    in_error_block = false; 
+                    UI::warn(line.substr(7));
+                } 
+                else {
+                    in_error_block = false; 
+                    UI::info("[" + args[0] + " stdout] " + line);
                 }
-            } 
-            else if (line.rfind("[WARN]|", 0) == 0) {
-                in_error_block = false; // Reset block state if a warning interrupts
-                UI::warn(line.substr(7));
-            } 
-            else {
-                in_error_block = false; // Reset block state on standard logs
-                UI::info("[" + args[0] + " stdout] " + line);
+            }
+        }
+        else if (fds[0].revents & (POLLERR | POLLHUP)) {
+             throw std::runtime_error("IPC channel tracking broken link: Daemon stdout pipe disconnected.");
+        }
+
+        // ====================================================================
+        // CHANNEL 2: STANDARD ERROR (Crash Dumps, Stack Traces, Native Logs)
+        // ====================================================================
+        if (fds[1].revents & POLLIN) {
+            ssize_t n = read(fds[1].fd, buffer, sizeof(buffer) - 1);
+            if (n > 0) {
+                buffer[n] = '\0';
+                err_accumulator += buffer;
+                
+                size_t newline_pos;
+                while ((newline_pos = err_accumulator.find('\n')) != std::string::npos) {
+                    std::string line = err_accumulator.substr(0, newline_pos);
+                    err_accumulator = err_accumulator.substr(newline_pos + 1);
+                    if (!line.empty()) {
+                        UI::warn("[JVM STDERR] " + line); 
+                    }
+                }
             }
         }
     }
 
-    // Flush any trailing fragments remaining inside the accumulator
-    if (!line_accumulator.empty() && line_accumulator.find_first_not_of(" \t\r\n") != std::string::npos) {
-        if (line_accumulator.rfind("[ERROR]|", 0) == 0) {
-            std::string clean_line = line_accumulator.substr(8);
+    // Flush any trailing fragments remaining inside the STDOUT accumulator
+    if (!out_accumulator.empty() && out_accumulator.find_first_not_of(" \t\r\n") != std::string::npos) {
+        if (out_accumulator.rfind("[ERROR]|", 0) == 0) {
+            std::string clean_line = out_accumulator.substr(8);
             if (!in_error_block) {
                 UI::error(clean_line);
             } else {
@@ -248,14 +293,20 @@ void call_java_tool(const std::vector<std::string>& args) {
                 std::cerr << "         " << clean_line << std::endl;
             }
         } 
-        else if (line_accumulator.rfind("[WARN]|", 0) == 0) {
-            UI::warn(line_accumulator.substr(7));
+        else if (out_accumulator.rfind("[WARN]|", 0) == 0) {
+            UI::warn(out_accumulator.substr(7));
         } 
         else {
-            UI::info("[" + args[0] + " stdout] " + line_accumulator);
+            UI::info("[" + args[0] + " stdout] " + out_accumulator);
         }
     }
+
+    // Flush any trailing fragments remaining inside the STDERR accumulator
+    if (!err_accumulator.empty() && err_accumulator.find_first_not_of(" \t\r\n") != std::string::npos) {
+        UI::warn("[JVM STDERR] " + err_accumulator);
+    }
 }
+
 
 /**
  * Smart Command Runner: Routes tools to either the persistent Daemon or native Fork/Exec.

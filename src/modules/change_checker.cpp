@@ -12,6 +12,7 @@
 #include <xxhash.h>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
+#include "mkapk_config.hpp"
 
 namespace fs = std::filesystem;
 
@@ -95,7 +96,7 @@ std::map<std::string, std::map<std::string, std::string>> load_state_map(const f
  */
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
     const fs::path& bin_dir, 
-    const std::string& config_content, 
+    const MkapkConfig& config,
     bool force_all,
     bool is_release) // Added profile flag to govern differential resolution tracking
 {
@@ -107,9 +108,9 @@ std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
     
     auto old_state = load_state_map(hash_file);
     
-    fs::path src_path = MkapkEnv::resolve_path(MkapkEnv::get_json_val("SRC_DIR", config_content));
-    fs::path res_path = MkapkEnv::resolve_path(MkapkEnv::get_json_val("RES_DIR", config_content));
-    fs::path manifest_path = MkapkEnv::resolve_path(MkapkEnv::get_json_val("MANIFEST", config_content));
+    fs::path src_path = MkapkEnv::resolve_path(config.src_dir);
+    fs::path res_path = MkapkEnv::resolve_path(config.res_dir);
+    fs::path manifest_path = MkapkEnv::resolve_path(config.manifest);
 
     BuildResults results;
     std::map<std::string, std::string> next_state; 
