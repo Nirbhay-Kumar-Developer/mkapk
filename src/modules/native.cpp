@@ -7,6 +7,7 @@
 #include <functional>
 #include <future>
 #include <mutex>
+#include <cstdlib>
 #include "mkapk_helpers.hpp"
 
 namespace fs = std::filesystem;
@@ -26,8 +27,8 @@ static std::mutex console_mutex;
 
 /**
  * (Step 0) Compiles user-defined target structures using parallel async workers.
- * UPDATED: Iterates through granular layout specifications to handle custom names, 
- * independent source maps, and automated target mapping configurations.
+ * UPDATED: Enforces persistent linking caches, resolves dynamic environment prefixes,
+ * and secures async lambda memory scopes.
  */
 bool compile_native(
     const std::string& NDK_BIN, 
@@ -37,7 +38,7 @@ bool compile_native(
     const std::string& target_api,
     RunFunc run_func,
     const std::vector<fs::path>& changed_files,
-    const std::vector<NativeTargetConfig>& native_targets) // Replaced flat single name/flags with structured targets vector
+    const std::vector<NativeTargetConfig>& native_targets) 
 {
     if (native_targets.empty()) {
         std::lock_guard<std::mutex> lock(console_mutex);
@@ -47,7 +48,9 @@ bool compile_native(
 
     // --- TERMUX NATIVE SYSTEM HEADER INJECTION ---
     std::vector<std::string> includes;
-    fs::path termux_usr_include = "/data/data/com.termux/files/usr/include";
+    const char* prefix_env = std::getenv("PREFIX");
+    fs::path termux_usr_include = prefix_env ? fs::path(prefix_env) / "include" : "/data/data/com.termux/files/usr/include";
+    
     if (fs::exists(termux_usr_include)) {
         includes.push_back("-I" + termux_usr_include.string());
     }
@@ -88,8 +91,9 @@ bool compile_native(
         }
 
         for (const std::string& arch : arch_list) {
-            // Capture target blueprint specifications by value [=] to safeguard async stack lifetimes
-            compile_workers.push_back(std::async(std::launch::async, [=, &includes]() {
+            // SECURED: Capturing entirely by value [=] guarantees memory safety for detached threads
+            // preventing dangling references if the stack unwinds early.
+            compile_workers.push_back(std::async(std::launch::async, [=]() {
                 std::string apk_lib_dir = ARCH_MAP.count(arch) ? ARCH_MAP[arch] : "unknown";
                 if (apk_lib_dir == "unknown") return;
 
@@ -101,6 +105,8 @@ bool compile_native(
                 fs::path lib_out = bin_dir / "lib" / apk_lib_dir;
                 fs::create_directories(obj_cache);
                 fs::create_directories(lib_out);
+
+                bool objects_updated = false;
 
                 // 1. Isolated Incremental Compilation Phase (.c/.cpp -> .o)
                 for (const auto& src_file : target_files_to_compile) {
@@ -128,6 +134,9 @@ bool compile_native(
                     cc_args.insert(cc_args.end(), target.extra_flags.begin(), target.extra_flags.end());
 
                     run_func(cc_args, "Compilation failed for [" + target.name + "] on ABI [" + apk_lib_dir + "] for file: " + src_file.filename().string());
+                    
+                    // Track that compilation actually occurred in this pass
+                    objects_updated = true;
                 }
 
                 // 2. Isolated Target Object Discovery
@@ -140,9 +149,11 @@ bool compile_native(
                     }
                 }
 
+                fs::path output_so = lib_out / ("lib" + target.name + ".so");
+
                 // 3. Isolated Linking Phase (.o -> target-specific .so)
-                if (!obj_list.empty()) {
-                    fs::path output_so = lib_out / ("lib" + target.name + ".so");
+                // OPTIMIZED: Only link if objects were recompiled OR if the .so does not exist.
+                if (!obj_list.empty() && (objects_updated || !fs::exists(output_so))) {
                     
                     {
                         std::lock_guard<std::mutex> lock(console_mutex);

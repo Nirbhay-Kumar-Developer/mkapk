@@ -31,20 +31,35 @@ namespace MkapkEnv {
 
     // Forward helper for standard execution tracking
     bool run_system_cmd(const std::vector<std::string>& args) {
-        pid_t pid = fork();
-        if (pid == 0) {
-            std::vector<char*> c_args;
-            for (const auto& arg : args) c_args.push_back(const_cast<char*>(arg.c_str()));
-            c_args.push_back(nullptr);
-            execvp(c_args[0], c_args.data());
-            _exit(127);
-        } else if (pid > 0) {
-            int status;
-            waitpid(pid, &status, 0);
-            return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
-        }
+    if (args.empty()) {
         return false;
     }
+
+    // Prepare the arguments array for the C API
+    std::vector<char*> c_args;
+    c_args.reserve(args.size() + 1); // Minor optimization to prevent reallocation
+    for (const auto& arg : args) {
+        c_args.push_back(const_cast<char*>(arg.c_str()));
+    }
+    c_args.push_back(nullptr);
+
+    pid_t pid;
+    
+    // We use posix_spawnp (with the 'p') to mirror execvp's PATH resolution behavior.
+    // If you used posix_spawn, you would have to provide absolute paths.
+    int spawn_status = posix_spawnp(&pid, c_args[0], nullptr, nullptr, c_args.data(), environ);
+
+    // spawn_status is 0 on success
+    if (spawn_status == 0) {
+        int status;
+        // Block and wait for the child process to finish
+        if (waitpid(pid, &status, 0) != -1) {
+            return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        }
+    }
+    
+    return false;
+}
     
       MkapkConfig load_config(const fs::path& config_path) {
         MkapkConfig config;
