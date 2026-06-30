@@ -11,3 +11,4 @@ bundle.cpp
 .build_apk.pyc
 test/log.txt
 test/strace-log.txt
+scala.pl

@@ -1,173 +1,21 @@
-#include <iostream>
 #include <vector>
 #include <string>
-#include <filesystem>
+#include <sstream>
 #include <algorithm>
 #include <functional>
-#include <sys/wait.h>
+#include <poll.h>
+#include <cerrno>
 #include <unistd.h>
-#include <sstream>
+#include <sys/wait.h>
+
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
-#include <poll.h>
-#include <cerrno>
 
-namespace fs = std::filesystem;
-
-/**
- * SECTION: DAEMON STATE MANAGEMENT
- */
 static int pipe_to_jvm[2] = {-1, -1};   // C++ writes to JVM
 static int pipe_from_jvm[2] = {-1, -1}; // C++ reads from JVM
 static int pipe_err_from_jvm[2];
 static pid_t daemon_pid = -1;
-
-/**
- * Permanently initializes the Java Daemon as a subprocess.
- * Replaces JNI_CreateJavaVM to bypass Android memory tagging issues.
- */
-void start_daemon(const std::string& classpath) {
-    if (pipe(pipe_to_jvm) == -1 || pipe(pipe_from_jvm) == -1 || pipe(pipe_err_from_jvm) == -1) {
-        throw std::runtime_error("System resource allocation failure: Failed to create IPC pipes.");
-    }
-
-    daemon_pid = fork();
-
-    if (daemon_pid == 0) { // Child Process: The JVM
-        dup2(pipe_to_jvm[0], STDIN_FILENO);
-        dup2(pipe_from_jvm[1], STDOUT_FILENO);
-        dup2(pipe_err_from_jvm[1], STDERR_FILENO);
-
-        close(pipe_to_jvm[1]);
-        close(pipe_from_jvm[0]);
-        close(pipe_err_from_jvm[0]);
-
-        execlp("java", "java", 
-               "-Djava.security.manager=allow",
-               "-cp", classpath.c_str(), 
-               "com.mkapk.tools.MkapkTools", 
-               nullptr);
-        
-        _exit(127);
-    } 
-    else if (daemon_pid > 0) { // Parent Process: mkapk Native
-        close(pipe_to_jvm[0]);
-        close(pipe_from_jvm[1]);
-        close(pipe_err_from_jvm[1]);
-
-        std::string start_cmd = "START_DAEMON\n";
-        if (write(pipe_to_jvm[1], start_cmd.c_str(), start_cmd.length()) == -1) {
-             throw std::runtime_error("System write synchronization failed on JVM entry command.");
-        }
-
-        // --- UPDATED ERROR SQUELCH FILTER SEQUENCES ---
-        const std::vector<std::string> TARGET_SEQUENCE = {
-            "WARNING: A terminally deprecated method in java.lang.System has been called",
-            "WARNING: System::setSecurityManager has been called by com.mkapk.tools.MkapkTools (file:/data/data/com.termux/files/usr/share/mkapk/mkapk-coordinator.jar)",
-            "WARNING: Please consider reporting this to the maintainers of com.mkapk.tools.MkapkTools",
-            "WARNING: System::setSecurityManager will be removed in a future release"
-        };
-
-        std::vector<std::string> buffered_err_lines;
-        std::string current_err_line;
-        int sequence_state = 0;
-
-        auto flush_err_lines = [&]() {
-            for (const auto& line : buffered_err_lines) {
-                // Inline filter step to discard the 2-line dynamic JAnsi UnsatisfiedLinkError block
-                if (line.rfind("Failed to load native library:jansi-", 0) == 0) {
-                    continue; 
-                }
-                if (line.find("java.lang.UnsatisfiedLinkError:") != std::string::npos && 
-                    line.find("libjansi.so: dlopen failed: library \"libc.so.6\" not found") != std::string::npos) {
-                    continue;
-                }
-                UI::warn("JVM Internal Trace: " + line);
-            }
-            buffered_err_lines.clear();
-            sequence_state = 0;
-        };
-
-        char buffer[256];
-        ssize_t n = read(pipe_from_jvm[0], buffer, sizeof(buffer) - 1);
-        
-        if (n > 0) {
-            buffer[n] = '\0';
-            std::string resp(buffer);
-            
-            if (resp.find("MKAPK_DAEMON_STARTED") == std::string::npos) {
-                char err_buf[1024];
-                ssize_t err_n = read(pipe_err_from_jvm[0], err_buf, sizeof(err_buf) - 1);
-                std::string err_msg = "";
-                if (err_n > 0) {
-                    err_buf[err_n] = '\0';
-                    err_msg = " Stderr context: " + std::string(err_buf);
-                }
-                throw std::runtime_error(UI::Msg::DAEMON_FAIL + " Handshake mismatch. Response output: " + resp + err_msg);
-            }
-
-            char err_chunk[4096];
-            struct timeval tv{0, 50000};
-            fd_set rfds;
-            FD_ZERO(&rfds);
-            FD_SET(pipe_err_from_jvm[0], &rfds);
-
-            if (select(pipe_err_from_jvm[0] + 1, &rfds, nullptr, nullptr, &tv) > 0) {
-                ssize_t err_bytes = read(pipe_err_from_jvm[0], err_chunk, sizeof(err_chunk) - 1);
-                if (err_bytes > 0) {
-                    err_chunk[err_bytes] = '\0';
-                    
-                    for (ssize_t i = 0; i < err_bytes; ++i) {
-                        if (err_chunk[i] == '\n') {
-                            if (sequence_state < 4 && current_err_line == TARGET_SEQUENCE[sequence_state]) {
-                                buffered_err_lines.push_back(current_err_line);
-                                sequence_state++;
-                                if (sequence_state == 4) {
-                                    buffered_err_lines.clear();
-                                    sequence_state = 0;
-                                }
-                            } else {
-                                buffered_err_lines.push_back(current_err_line);
-                                flush_err_lines();
-                            }
-                            current_err_line.clear();
-                        } else if (err_chunk[i] != '\r') {
-                            current_err_line.push_back(err_chunk[i]);
-                        }
-                    }
-                    if (!current_err_line.empty()) {
-                        buffered_err_lines.push_back(current_err_line);
-                        flush_err_lines();
-                    }
-                }
-            }
-        } else {
-            throw std::runtime_error(UI::Msg::DAEMON_FAIL + " JVM subprocess terminated abruptly during runtime sequence bootstrapping.");
-        }
-    } else {
-        throw std::runtime_error("System execution fork failure routing background processes.");
-    }
-}
-
-/**
- * Signals the Daemon to shut down gracefully.
- */
-void stop_daemon() {
-    if (daemon_pid > 0) {
-        std::string stop_cmd = "STOP_DAEMON\n";
-        if (write(pipe_to_jvm[1], stop_cmd.c_str(), stop_cmd.length()) == -1) {
-            UI::warn("Failed to transmit tear-down sequence to operational background daemon.");
-        }
-        
-        close(pipe_to_jvm[1]);
-        close(pipe_from_jvm[0]);
-        
-        int status;
-        waitpid(daemon_pid, &status, 0);
-        daemon_pid = -1;
-    }
-}
 
 /**
  * Executes a tool command by sending a delimited string to the Daemon.
@@ -314,7 +162,11 @@ void call_java_tool(const std::vector<std::string>& args) {
 void smart_run(const std::vector<std::string>& args, const std::string& err_msg) {
     if (args.empty()) return;
 
-    std::string tool_name = fs::path(args[0]).filename().string();
+    // Lightweight path filename resolution without full std::filesystem compilation overhead
+    std::string tool_path = args[0];
+    size_t last_slash = tool_path.find_last_of('/');
+    std::string tool_name = (last_slash == std::string::npos) ? tool_path : tool_path.substr(last_slash + 1);
+
     bool use_daemon = (tool_name == "d8" || tool_name == "r8" || 
                        tool_name == "javac" || tool_name == "resguard" ||
                        tool_name == "apksigner" || tool_name == "kotlinc");
