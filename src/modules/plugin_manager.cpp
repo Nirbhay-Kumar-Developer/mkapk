@@ -246,12 +246,14 @@ namespace MkapkEnv {
                         // ENFORCE ZERO-TRUST: Verify the status flag actually exists and is 1
                         bool is_verified = false;
                         if (fs::exists(status_path)) {
-                            std::ifstream sf(status_path);
-                            char flag;
-                            if (sf >> flag) {
-                                is_verified = (flag == '1');
+                            std::ifstream sf(status_path, std::ios::binary);
+                            if (sf.is_open()) {
+                                char flag = '\0';
+                                if (sf.get(flag)) {
+                                    is_verified = (flag == '1');
+                                }
+                                sf.close();
                             }
-                            sf.close();
                         }
 
                         // SECURITY BOUNDARY: Ignore tampered or legacy unverified plugins in the cache

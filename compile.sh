@@ -2,10 +2,10 @@
 set -e
 
 # --- Paths ---
-PKG_NAME="mkapk-deb"
+PKG_NAME="mkapk-aarch64"
 STORAGE_PATH="/storage/emulated/0/Programming/mkapk"
 LOCAL_PATH="$HOME/mkapk_tmp_build"
-CLASS_PATH="$(cat classpath.txt)"
+CLASS_PATH="$(cat scripts/classpath.txt)"
 
 # Clean start
 trap 'rm -rf "$LOCAL_PATH"' EXIT 
@@ -34,8 +34,8 @@ JAR_NAME="mkapk-coordinator.jar"
 mkdir -p "$JAVA_BIN_DIR"
 
 # Find all .java files and compile them
-find "$JAVA_SRC_DIR" -name "*.java" > sources.txt
-javac -d "$JAVA_BIN_DIR" @sources.txt -cp $CLASS_PATH
+find "$JAVA_SRC_DIR" -name "*.java" > scripts/sources.txt
+javac -d "$JAVA_BIN_DIR" @scripts/sources.txt -cp $CLASS_PATH
 
 # Create the JAR file
 jar cvf "build/$JAR_NAME" -C "$JAVA_BIN_DIR" .

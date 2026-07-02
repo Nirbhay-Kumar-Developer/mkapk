@@ -1,0 +1,78 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -e
+
+echo ">> Configuring mkapk build system..."
+
+# Define common paths
+TERMUX_HOME="/data/data/com.termux/files/home"
+BASHRC="/data/data/com.termux/files/usr/etc/bash.bashrc"
+SDK_ROOT="$TERMUX_HOME/android-sdk/Sdk"
+CMD_TOOLS_DIR="$SDK_ROOT/cmdline-tools/latest"
+SDK_MANAGER="$CMD_TOOLS_DIR/bin/sdkmanager"
+ZIP_FILE="$TERMUX_HOME/commandlinetools-linux-14742923_latest.zip"
+
+# 1. Check for Command Line Tools
+if [ -x "$SDK_MANAGER" ]; then
+    echo ">> Valid Android SDK command-line tools detected."
+else
+    echo ">> No intact command-line tools found. Beginning fresh installation..."
+    mkdir -p "$SDK_ROOT/cmdline-tools"
+
+    echo ">> Downloading Android SDK command-line tools."
+    wget -O "$ZIP_FILE" https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
+
+    echo ">> Extracting command-line tools."
+    unzip -q "$ZIP_FILE" -d "$SDK_ROOT/cmdline-tools/"
+
+    echo ">> Setting up Android SDK"
+    cd "$SDK_ROOT/cmdline-tools/"
+    
+    # Safely replace 'latest' directory
+    rm -rf latest 
+    mv cmdline-tools latest
+    chmod +x "$CMD_TOOLS_DIR/bin/"*
+
+    # Clean up the downloaded zip file
+    rm -f "$ZIP_FILE"
+fi
+
+# 2. Check for an installed Android Platform (Any API level)
+PLATFORM_FOUND=0
+# Wildcard loop safely checks for any existing platform version (e.g., android-33, android-34)
+for jar in "$SDK_ROOT"/platforms/android-*/android.jar; do
+    if [ -f "$jar" ]; then
+        PLATFORM_FOUND=1
+        echo ">> Valid Android platform detected at: $jar"
+        break
+    fi
+done
+
+# If no platform was found, use the sdkmanager to install the baseline requirement
+if [ "$PLATFORM_FOUND" -eq 0 ]; then
+    echo ">> No Android platform found. Downloading Android SDK platform 33..."
+    yes | "$SDK_MANAGER" "platforms;android-33"
+else
+    echo ">> Skipping platform download."
+fi
+
+# 3. Add Environment Variables Safely (Prevent duplicates)
+if ! grep -q "export ANDROID_HOME=$SDK_ROOT" "$BASHRC"; then
+    echo ">> Adding SDK environment variables to bash.bashrc"
+    echo "export ANDROID_HOME=$SDK_ROOT" >> "$BASHRC"
+    echo "export PATH=\$PATH:$CMD_TOOLS_DIR/bin" >> "$BASHRC"
+    
+    # Source it for the current subshell execution
+    source "$BASHRC"
+fi
+
+# 4. Finalize mkapk setup
+cd "$TERMUX_HOME"
+# Only chmod if the binary actually exists to prevent potential dpkg ordering errors
+if [ -f "$PREFIX/bin/mkapk" ]; then
+    chmod +x "$PREFIX/bin/mkapk"
+fi
+
+echo ">> Setup complete."
+echo ">> Type 'mkapk' to begin."
+
+exit 0
