@@ -55,8 +55,9 @@ bool compile_incremental_kotlin(
     }
 
     // 2. Construct base arguments
-    std::vector<std::string> args = {
+        std::vector<std::string> args = {
         KOTLINC,
+        "-language-version", "1.9",
         "-jvm-target", "1.8",
         "-no-jdk",
         "-classpath", classpath,

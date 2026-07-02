@@ -1,0 +1,35 @@
+{
+    "NAME": "PolyglotTest",
+    
+    "BIN_DIR": "bin",
+    "SRC_DIR": "src",
+    "RES_DIR": "res",
+    "ASSETS_DIR": "assets",
+    "MANIFEST": "AndroidManifest.xml",
+    
+    "SDK_ROOT": "~/android-sdk/Sdk",
+    "TARGET_SDK": "34",
+    "JAVA_VERSION": "17",
+    "COMPOSE_PLUGIN": "",
+    "PROGUARD_RULES": "proguard-rules.pro",
+    
+    "SYSTEM_SHARED_LIBS": [
+        "c++_shared"
+    ],
+    "NATIVE_TARGETS": [
+        {
+            "NAME": "native",
+            "SOURCES": [
+                "src/C/core_logic.c",
+                "src/C++/native_bridge.cpp"
+            ],
+            "EXTRA_FLAGS": [
+                "-O3",
+                "-fPIC"
+            ]
+        }
+    ],
+    
+    "KEYSTORE": "~/.android/debug.keystore",
+    "KEYSTORE_ALIAS": "androiddebugkey"
+}

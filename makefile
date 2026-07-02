@@ -1,6 +1,6 @@
 # --- Compiler & Flags ---
 CXX = g++
-CXXFLAGS = -O3 -std=c++17 -I./src -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux -I./include
+CXXFLAGS = -O3 -std=c++20 -I./src -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux -I./include
 
 # --- Library Paths ---
 # We define the JVM lib path as a variable to keep the linking line clean
