@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Installation Guide - mkapk</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html">
+                    <i class="fas fa-mobile-alt"></i>
+                    <span>mkapk</span>
+                </a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="../index.html">Home</a></li>
+                <li class="dropdown">
+                    <a href="#">Docs</a>
+                    <div class="dropdown-menu">
+                        <a href="installation.html">Installation</a>
+                        <a href="quickstart.html">Quick Start</a>
+                        <a href="configuration.html">Configuration</a>
+                        <a href="usage-guide.html">Usage Guide</a>
+                        
+                    </div>
+                </li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                
+                <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank"><i class="fab fa-github"></i> GitHub</a></li>
+            </ul>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container">
+            <h1>Installation Guide</h1>
+            <p>Get mkapk up and running on your Termux environment</p>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+        <ul class="breadcrumb">
+            <li><a href="../index.html">Home</a></li>
+            <li>Installation</li>
+        </ul>
+
+        <h2>Prerequisites</h2>
+        <p>Before installing mkapk, ensure your Termux environment has the following packages:</p>
+
+        <div class="alert alert-info">
+            <strong>Note:</strong> These are required for mkapk to function properly. Install them before proceeding.
+        </div>
+
+        <h3>Required Packages</h3>
+        <ul>
+            <li><strong>openjdk-21</strong> - Java Development Kit (JVM runtime)</li>
+            <li><strong>ndk-multilib</strong> - Android NDK with multiple architectures</li>
+            <li><strong>aapt2</strong> - Android Asset Packaging Tool 2</li>
+            <li><strong>apksigner</strong> - APK signing utility</li>
+            <li><strong>clang</strong> - C/C++ compiler from LLVM</li>
+            <li><strong>binutils</strong> - GNU binary utilities (includes strip)</li>
+            <li><strong>libzip</strong> - Library for working with ZIP archives</li>
+            <li><strong>openssl</strong> - Cryptography library</li>
+            <li><strong>wget</strong> - File downloader utility</li>
+            <li><strong>kotlin</strong> - Support for Kotlin language</li>
+        </ul>
+
+        <h2>Installation Steps</h2>
+
+        <h3>Step 1: Dependencies</h3>
+        <p>Open Termux and run the following command to install all dependencies and mkapk:</p>
+
+        <div class="stepper">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">            
+                    <div class="command-box">
+                        <span class="prompt">$</span> apt update && apt install openjdk-21 ndk-multilib aapt2 clang binutils libzip openssl apksigner wget kotlin -y
+                    </div>
+                </div>
+            </div>
+
+        <div class="alert alert-success">
+            <strong>Success!</strong> All dependencies are now installed. Proceed to download mkapk.
+        </div>
+
+        <h3>Step 2: Download Debian Package</h3>
+        <p>Download the pre-compiled Debian package:</p>
+
+        <div class="stepper">
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">                                     
+                    <div class="command-box">
+                        <span class="prompt">$</span> wget https://github.com/Nirbhay-Kumar-Developer/mkapk/releases/latest/download/mkapk-aarch64.deb
+                    </div>
+                </div>
+            </div>
+            
+        <h3>Step 3: Install the package:</h3>       
+
+        <div class="stepper">
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">                   
+                    <div class="command-box">
+                        <span class="prompt">$</span> dpkg --install ./mkapk-aarch64.deb
+                    </div>
+                </div>
+            </div>
+
+        <h2>Method 2: Compile from Source</h2>
+        <p>For advanced users who want to compile mkapk from source:</p>
+
+        <div class="stepper">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>Clone the Repository</h4>
+                    <div class="command-box">
+                        <span class="prompt">$</span> git clone https://github.com/Nirbhay-Kumar-Developer/mkapk.git<br>
+                        <span class="prompt">$</span> cd mkapk
+                    </div>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>Build the Project</h4>
+                    <div class="command-box">
+                        <span class="prompt">$</span> bash compile.sh && dpkg --install mkapk-aarch64.deb        
+                    </div>
+                </div>
+            </div>   
+
+        <h2>Verify Installation</h2>
+        <p>Check if mkapk was installed correctly:</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk --help
+        </div>
+
+        <p>You should see the help menu with all available commands. If this works, mkapk is successfully installed!</p>
+
+        <div class="alert alert-success">
+            <strong>Installation Complete!</strong> You can now proceed to the <a href="quickstart.html">Quick Start Guide</a>.
+        </div>
+
+        <h2>Troubleshooting Installation</h2>
+
+        <h3>Issue: "mkapk: command not found"</h3>
+        <p>The binary may not be in your PATH. Try:</p>
+        <div class="command-box">
+            <span class="prompt">$</span> which mkapk
+        </div>
+        <p>If it returns nothing, reinstall the package or add the installation directory to your PATH.</p>
+
+        <h3>Issue: "Permission denied"</h3>
+        <p>Ensure the binary has execute permissions:</p>
+        <div class="command-box">
+            <span class="prompt">$</span> chmod +x $PREFIX/bin/mkapk
+        </div>
+
+        <h3>Issue: Missing Dependencies</h3>
+        <p>Run the prerequisite installation again:</p>
+        <div class="command-box">
+            <span class="prompt">$</span> apt install -y openjdk-21 ndk-multilib aapt2 clang binutils libzip openssl apksigner
+        </div>
+
+        <h2>Next Steps</h2>
+        <p>After successful installation:</p>
+        <ol>
+            <li>Read the <a href="quickstart.html">Quick Start Guide</a> to create your first project</li>
+            <li>Review the <a href="configuration.html">Configuration Guide</a> to customize your builds</li>
+            <li>Check the <a href="usage-guide.html">Usage Guide</a> for detailed command reference</li>
+        </ol>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>About mkapk</h4>
+                    <p>A lightweight Android build system for Termux.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="installation.html">Installation</a></li>
+                        <li><a href="quickstart.html">Quick Start</a></li>
+                        <li><a href="configuration.html">Configuration</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank">GitHub</a></li>
+                        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Nirbhay-Kumar-Developer. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <div class="back-to-top" id="backToTop">
+        <i class="fas fa-arrow-up"></i>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

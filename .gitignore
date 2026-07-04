@@ -1,0 +1,7 @@
+build/
+test/bin/
+bundle.sh
+bundle.cpp
+test/log.txt
+test/strace-log.txt
+compile_commands.json

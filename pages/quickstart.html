@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quick Start Guide - mkapk</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.js">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html">
+                    <i class="fas fa-mobile-alt"></i>
+                    <span>mkapk</span>
+                </a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="../index.html">Home</a></li>
+                <li class="dropdown">
+                    <a href="#">Docs</a>
+                    <div class="dropdown-menu">
+                        <a href="installation.html">Installation</a>
+                        <a href="quickstart.html">Quick Start</a>
+                        <a href="configuration.html">Configuration</a>
+                        <a href="usage-guide.html">Usage Guide</a>
+                        
+                    </div>
+                </li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                
+                <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank"><i class="fab fa-github"></i> GitHub</a></li>
+            </ul>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container">
+            <h1>Quick Start Guide</h1>
+            <p>Build your first APK in 5 minutes</p>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+        <ul class="breadcrumb">
+            <li><a href="../index.html">Home</a></li>
+            <li><a href="installation.html">Installation</a></li>
+            <li>Quick Start</li>
+        </ul>
+
+        <div class="alert alert-info">
+            <strong>Prerequisite:</strong> Ensure mkapk is installed. See the <a href="installation.html">Installation Guide</a> if you haven't done so yet.
+        </div>
+
+        <h2>Step 1: Initialize a New Project</h2>
+        <p>Create a new directory and initialize mkapk project structure:</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkdir my-first-app<br>
+            <span class="prompt">$</span> cd my-first-app<br>
+            <span class="prompt">$</span> mkapk init
+        </div>
+
+        <p>This creates the following structure:</p>
+        <pre><code>my-first-app/         
+├── AndroidManifest.xml
+├── andresguard-config.xml
+├── assets
+├── bin
+│   ├── classes
+│   │   ├── java_classes
+│   │   └── kotlin_classes
+│   └── debug.keystore
+├── config.json
+├── proguard-rules.pro
+├── releases
+├── res
+│   ├── anim
+│   ├── animator
+│   ├── drawable
+│   ├── drawable-night
+│   ├── font
+│   ├── layout
+│   │   └── activity_main.xml
+│   ├── layout-land
+│   ├── menu
+│   ├── mipmap
+│   ├── values
+│   ├── values-night
+│   └── xml
+└── src
+    ├── C
+    │   └── core_logic.c
+    ├── C++
+    │   └── native_bridge.cpp
+    └── com
+        └── example
+            └── polyglot
+                ├── JavaBridge.java              
+                └── MainActivity.kt</code></pre>
+
+        <h2>Step 2: Configure Your Project</h2>
+        <p>Edit <code>config.json</code> to match your project. Here's a basic example:</p>
+
+        <pre><code>{
+  "NAME": "MyApp",
+  "BIN_DIR": "./bin",
+  "SRC_DIR": "./src/main",
+  "RES_DIR": "./src/res",
+  "ASSETS_DIR": "./assets",
+  "MANIFEST": "./src/main/AndroidManifest.xml",
+  "SDK_ROOT": "~/android-sdk",
+  "TARGET_SDK": "34",
+  "JAVA_VERSION": "17",
+  "KEYSTORE": "~/.android/debug.keystore",
+  "KEYSTORE_ALIAS": "androiddebugkey",
+  "NDK_BIN": "~/android-ndk/toolchains/llvm/prebuilt/linux-aarch64/bin"
+}</code></pre>
+
+        <div class="alert alert-warning">
+            <strong>Important:</strong> Update the SDK_ROOT and NDK_BIN paths to match your Android SDK installation.
+        </div>
+
+        <h2>Step 3: Add Source Code</h2>
+        <p>Create your first Java file. Open <code>src/main/java/com/example/MainActivity.java</code>:</p>
+
+        <pre><code>package com.example;
+
+import android.app.Activity;
+import android.os.Bundle;
+
+public class MainActivity extends Activity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+    }
+}</code></pre>
+
+        <h2>Step 4: Create AndroidManifest.xml</h2>
+        <p>Create <code>src/main/AndroidManifest.xml</code>:</p>
+
+        <pre><code>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example"&gt;
+
+    &lt;application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"&gt;
+
+        &lt;activity android:name=".MainActivity"
+            android:exported="true"&gt;
+            &lt;intent-filter&gt;
+                &lt;action android:name="android.intent.action.MAIN" /&gt;
+                &lt;category android:name="android.intent.category.LAUNCHER" /&gt;
+            &lt;/intent-filter&gt;
+        &lt;/activity&gt;
+    &lt;/application&gt;
+
+&lt;/manifest&gt;</code></pre>
+
+        <h2>Step 5: Build Your APK</h2>
+        <p>Run a debug build:</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build
+        </div>
+
+        <p>For a release build with optimizations:</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build -release
+        </div>
+
+        <p>For multi-ABI universal APK:</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build -ndk-all
+        </div>
+
+        <div class="alert alert-success">
+            <strong>Success!</strong> Your APK is ready. Find it in the <code>bin/</code> directory.
+        </div>
+
+        <h2>Step 6: Install and Test</h2>
+        <p>Install the APK on your device using adb or direct installation:</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> adb install bin/MyApp.debug.apk
+        </div>
+
+        <h2>Common Build Flags</h2>
+        <div class="table-responsive">
+            <table>
+                <tr>
+                    <th>Flag</th>
+                    <th>Description</th>
+                    <th>Example</th>
+                </tr>
+                <tr>
+                    <td><code>-release</code></td>
+                    <td>Production build with optimizations</td>
+                    <td><code>mkapk build -release</code></td>
+                </tr>
+                <tr>
+                    <td><code>-all</code></td>
+                    <td>Force full rebuild (ignore cache)</td>
+                    <td><code>mkapk build -all</code></td>
+                </tr>
+                <tr>
+                    <td><code>-ndk-all</code></td>
+                    <td>Build for all supported architectures</td>
+                    <td><code>mkapk build -ndk-all</code></td>
+                </tr>
+                <tr>
+                    <td><code>-arch</code></td>
+                    <td>Build for specific architecture</td>
+                    <td><code>mkapk build -arch aarch64</code></td>
+                </tr>
+                <tr>
+                    <td><code>-no-obs</code></td>
+                    <td>Disable obfuscation in release build</td>
+                    <td><code>mkapk build -release -no-obs</code></td>
+                </tr>
+            </table>
+        </div>
+
+        <h2>Next Steps</h2>
+        <ul>
+            <li>Read the <a href="configuration.html">Configuration Guide</a> for advanced project setup</li>
+            <li>Check the <a href="usage-guide.html">Usage Guide</a> for all available commands</li>
+            <li>Visit the <a href="faq.html">FAQ</a> for common questions</li>
+        </ul>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>About mkapk</h4>
+                    <p>A lightweight Android Build System for Termux.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="installation.html">Installation</a></li>
+                        <li><a href="quickstart.html">Quick Start</a></li>
+                        <li><a href="configuration.html">Configuration</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank">GitHub</a></li>
+                        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Nirbhay-Kumar-Developer. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <div class="back-to-top" id="backToTop">
+        <i class="fas fa-arrow-up"></i>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

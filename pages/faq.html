@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FAQ - mkapk</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html">
+                    <i class="fas fa-mobile-alt"></i>
+                    <span>mkapk</span>
+                </a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="../index.html">Home</a></li>
+                <li class="dropdown">
+                    <a href="#">Docs</a>
+                    <div class="dropdown-menu">
+                        <a href="installation.html">Installation</a>
+                        <a href="quickstart.html">Quick Start</a>
+                        <a href="configuration.html">Configuration</a>
+                        <a href="usage-guide.html">Usage Guide</a>
+                        <a href="advanced.html">Advanced</a>
+                    </div>
+                </li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                
+                <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank"><i class="fab fa-github"></i> GitHub</a></li>
+            </ul>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container">
+            <h1>Frequently Asked Questions</h1>
+            <p>Find answers to common questions about mkapk</p>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="faq-container">
+        <ul class="breadcrumb">
+            <li><a href="../index.html">Home</a></li>
+            <li>FAQ</li>
+        </ul>
+
+        <h2>General Questions</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>What is mkapk?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>mkapk is a lightweight Android build tool designed for Termux. It allows you to compile Android apps (APKs) directly on your Android device without the overhead of cross-compilation. It supports Java, Kotlin, C++, C, and other languages through an extensible plugin system.</p>
+            </div>
+        </div>        
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>Can I use mkapk on iOS or Windows?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>mkapk is designed specifically for Termux on Android and may not work on other platforms. It relies on Android-specific paths and tools that are only available in Termux.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>Is mkapk free?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Yes, mkapk is free and source-available (not open-source). You can view the source code on GitHub and contribute to the project via Issues.</p>
+            </div>
+        </div>
+
+        <h2>Installation & Setup</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>What are the minimum storage requirements?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>mkapk itself is relatively small (~730KB), but you need storage for:</p>
+                <ul>
+                    <li>Android SDK and OpenJDK: ~1-2 GB.</li>                    
+                    <li>Your projects: Varies by size.</li>
+                    <li>Plugin Languages: Varies by size.</li>
+                </ul>
+                <p>A minimum of 1-3 GB free storage is recommended.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>How do I update mkapk?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Follow the <a href="installation.html">installation guide. In later updates "mkapk update" will update it.</a>:</p>               
+            </div>
+        </div>        
+
+        <h2>Building & Compilation</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>How long does it take to build an APK?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Build time depends on project size and device specifications:</p>
+                <ul>
+                    <li>Small project (first build): 124-150 seconds</li>
+                    <li>Small project (incremental): 5-10 seconds</li>
+                    <li>Large project: 2-5+ minutes</li>
+                </ul>
+                <p>mkapk uses incremental compilation to speed up subsequent builds dramatically.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>What's the difference between debug and release builds?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Debug builds:</strong> Include debugging symbols, unoptimized, faster to build, larger file size.</p>
+                <p><strong>Release builds:</strong> Optimized, obfuscated (R8), signed, smaller file size, slower to build.</p>
+                <p>Use debug for development and release for distribution.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>How do I build for multiple architectures?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Use the <code>-ndk-all</code> flag to build for all supported architectures:</p>
+                <pre><code>mkapk build -ndk-all</code></pre>
+                <p>This creates split APKs for armv7, arm64, x86, and x86_64, plus a universal APK.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>Can I use C++ with mkapk?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Yes! mkapk supports C++ (and C) through native compilation. Configure native targets in <code>config.json</code> and write your C++ code in the <code>src/C++</code> directory. See the Advanced Guide for details.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>What languages does mkapk support?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Built-in support:</strong> Java, Kotlin, C, C++</p>
+                <p><strong>Through plugins:</strong> Any language which compiles to JVM bytecode or machine code, via the plugin system.</p>
+            </div>
+        </div>
+
+        <h2>Performance & Optimization</h2>       
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>Can I use R8 obfuscation?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Yes! mkapk automatically uses R8 (successor to ProGuard) for release builds. Provide ProGuard rules in <code>proguard-rules.pro</code> or disable obfuscation with <code>-no-obs</code> flag.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>How can I reduce APK size?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Several techniques:</p>
+                <ul>
+                    <li>Use release builds with R8 optimization</li>                    
+                    <li>Build architecture-specific APKs instead of universal</li>
+                    <li>Minimize dependencies and unused resources</li>                   
+                </ul>
+            </div>
+        </div>
+
+        <h2>Troubleshooting & Issues</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>Build fails with "missing android.jar"</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Ensure your SDK_ROOT and TARGET_SDK are correctly set in <code>config.json</code>.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>What if the JVM daemon crashes?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>mkapk automatically restarts the daemon. If issues persist, run <code>mkapk clean</code> to reset build state and try again.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>How do I view detailed build logs?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Build logs are printed to the console. For detailed compilation output, check the individual tool outputs.</p>
+            </div>
+        </div>
+
+        <h2>Plugins & Extensions</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>How to install plugins ?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Yes! mkapk has an extensible plugin system. See the <a href="https://github.com/Nirbhay-Kumar-Developer/mkapk-plugins">Plugin Reposirory</a> for detailed instructions on creating and signing plugins.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span>Are plugins secure?</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p>Yes, mkapk uses cryptographic verification (SHA256 + RSA) to ensure plugin integrity. Only signed plugins from trusted sources should be installed.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>About mkapk</h4>
+                    <p>A lightweight Android Build System for Termux.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="installation.html">Installation</a></li>
+                        <li><a href="quickstart.html">Quick Start</a></li>
+                        <li><a href="configuration.html">Configuration</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank">GitHub</a></li>
+                        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Nirbhay-Kumar-Developer. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <div class="back-to-top" id="backToTop">
+        <i class="fas fa-arrow-up"></i>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mkapk - Lightweight Android Build Tool for Termux</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <i class="fas fa-mobile-alt"></i>
+                <span>mkapk</span>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#home">Home</a></li>
+                <li class="dropdown">
+                    <a href="#">Docs</a>
+                    <div class="dropdown-menu">
+                        <a href="pages/installation.html">Installation</a>
+                        <a href="pages/quickstart.html">Quick Start</a>
+                        <a href="pages/configuration.html">Configuration</a>
+                        <a href="pages/usage-guide.html">Usage Guide</a>                      
+                    </div>
+                </li>
+                <li><a href="pages/faq.html">FAQ</a></li>
+                <li><a href="pages/troubleshooting.html">Troubleshooting</a></li>
+                <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk-plugins">Plugins</a></li>
+                <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank"><i class="fab fa-github"></i> GitHub</a></li>
+            </ul>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="hero-content">
+            <div class="hero-text">
+                <h1>mkapk</h1>
+                <p class="subtitle">Lightning-Fast Android Build Tool for Termux</p>
+                <p class="description">Compile APKs natively on your Android device with support for Java, Kotlin, C++, C, and more. Perfect for mobile development without the overhead of cross-compilation.</p>
+                <div class="hero-buttons">
+                    <a href="pages/quickstart.html" class="btn btn-primary">Get Started</a>
+                    <a href="pages/installation.html" class="btn btn-secondary">Install Now</a>
+                </div>
+            </div>
+            <div class="hero-visual">
+                <div class="code-block">
+                    <pre><code>$ mkapk init
+$ mkapk build -release
+$ mkapk build -ndk-all</code></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features">
+        <div class="container">
+            <h2>Why Choose mkapk?</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <h3>Ultra-Fast</h3>
+                    <p>Incremental builds detect changes instantly with xxHash3. Skip unnecessary recompilation.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-shield-alt"></i>
+                    <h3>Secure</h3>
+                    <p>Cryptographically signed plugins, zero-trust verification, and automatic dependency resolution.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-code"></i>
+                    <h3>Multi-Language</h3>
+                    <p>Native support for Java, Kotlin, C++, and C. Extensible plugin system for custom languages.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-boxes"></i>
+                    <h3>Multi-ABI</h3>
+                    <p>Generate universal APKs or split architecture-specific binaries for optimal size.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-cube"></i>
+                    <h3>Obfuscation</h3>
+                    <p>Built-in support for ProGuard obfuscation and AndResGuard resource minification.</p>
+                </div>
+                <div class="feature-card">
+                    <i class="fas fa-laptop"></i>
+                    <h3>Lightweight</h3>
+                    <p>Minimal dependencies, optimized for Termux environment. Run directly on your device.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Info Section -->
+    <section class="quick-info">
+        <div class="container">
+            <div class="info-grid">
+                <div class="info-item">
+                    <h3>87.6%</h3>
+                    <p>C++ Core</p>
+                </div>
+                <div class="info-item">
+                    <h3>7.8%</h3>
+                    <p>Java/JVM</p>
+                </div>
+                <div class="info-item">
+                    <h3>~730kbs</h3>
+                    <p>Binary Size</p>
+                </div>
+                <div class="info-item">
+                    <h3>4 ABIs</h3>
+                    <p>Supported</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta">
+        <div class="container">
+            <h2>Ready to Build on Your Device?</h2>
+            <p>Start with our quick installation guide and have your first APK compiled in minutes.</p>
+            <div class="cta-buttons">
+                <a href="pages/installation.html" class="btn btn-primary btn-large">Installation Guide</a>
+                <a href="pages/faq.html" class="btn btn-secondary btn-large">Learn More</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>About mkapk</h4>
+                    <p>A lightweight, native Android build orchestrator designed specifically for high-speed compilation in Termux.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="pages/installation.html">Installation</a></li>
+                        <li><a href="pages/configuration.html">Configuration</a></li>
+                        <li><a href="pages/usage-guide.html">Usage Guide</a></li>
+                        <li><a href="pages/faq.html">FAQ</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank">GitHub Repository</a></li>
+                        <li><a href="pages/troubleshooting.html">Troubleshooting</a></li>                       
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Legal</h4>
+                    <ul>
+                        <li><a href="pages/license.html">License</a></li>
+                        <li><a href="pages/security.html">Security</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Nirbhay-Kumar-Developer. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

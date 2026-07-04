@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Usage Guide - mkapk</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html">
+                    <i class="fas fa-mobile-alt"></i>
+                    <span>mkapk</span>
+                </a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="../index.html">Home</a></li>
+                <li class="dropdown">
+                    <a href="#">Docs</a>
+                    <div class="dropdown-menu">
+                        <a href="installation.html">Installation</a>
+                        <a href="quickstart.html">Quick Start</a>
+                        <a href="configuration.html">Configuration</a>
+                        <a href="usage-guide.html">Usage Guide</a>
+                        
+                    </div>
+                </li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                <li><a href="htyps://github.com/Nirbhay-Kumar-Developer/mkapk-plugins">Plugins</a></li>
+                <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank"><i class="fab fa-github"></i> GitHub</a></li>
+            </ul>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container">
+            <h1>Usage Guide</h1>
+            <p>Complete command reference and usage examples</p>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+        <ul class="breadcrumb">
+            <li><a href="../index.html">Home</a></li>
+            <li>Usage Guide</li>
+        </ul>
+
+        <h2>Command Overview</h2>
+        <p>mkapk provides the following main commands:</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk [command] [options]
+        </div>
+
+        <div class="table-responsive">
+            <table>
+                <tr>
+                    <th>Command</th>
+                    <th>Description</th>
+                    <th>Usage</th>
+                </tr>
+                <tr>
+                    <td><code>init</code></td>
+                    <td>Initialize a new project</td>
+                    <td><code>mkapk init</code></td>
+                </tr>
+                <tr>
+                    <td><code>build</code></td>
+                    <td>Build the project</td>
+                    <td><code>mkapk build [options]</code></td>
+                </tr>
+                <tr>
+                    <td><code>clean</code></td>
+                    <td>Remove build artifacts</td>
+                    <td><code>mkapk clean</code></td>
+                </tr>
+                <tr>
+                    <td><code>install</code></td>
+                    <td>Install a language plugin</td>
+                    <td><code>mkapk install <plugin.pl></code></td>
+                </tr>
+                <tr>
+                    <td><code>uninstall</code></td>
+                    <td>Remove a language plugin</td>
+                    <td><code>mkapk uninstall <plugin_name></code></td>
+                </tr>
+                <tr>
+                    <td><code>help</code></td>
+                    <td>Show help information</td>
+                    <td><code>mkapk help</code></td>
+                </tr>
+            </table>
+        </div>
+
+        <h2>Detailed Commands</h2>
+
+        <h3>mkapk init</h3>
+        <p>Initialize a new mkapk project with template structure.</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk init
+        </div>
+
+        <p><strong>What it does:</strong></p>
+        <ul>
+            <li>Creates config.json with default settings</li>
+            <li>Sets up directory structure (src, res, assets, bin)</li>
+            <li>Generates AndroidManifest.xml template</li>
+            <li>Creates sample Java class</li>
+        </ul>
+
+        <h3>mkapk build [options]</h3>
+        <p>Build your Android application. This is the main command you'll use during development.</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build [options]
+        </div>
+
+        <h4>Build Options</h4>
+        <div class="table-responsive">
+            <table>
+                <tr>
+                    <th>Flag</th>
+                    <th>Description</th>
+                    <th>Example</th>
+                </tr>
+                <tr>
+                    <td><code>-release</code></td>
+                    <td>Build for production (optimized, obfuscated)</td>
+                    <td><code>mkapk build -release</code></td>
+                </tr>
+                <tr>
+                    <td><code>-all</code></td>
+                    <td>Force complete rebuild (ignore incremental cache)</td>
+                    <td><code>mkapk build -all</code></td>
+                </tr>
+                <tr>
+                    <td><code>-arch &lt;abi&gt;</code></td>
+                    <td>Build for specific architecture</td>
+                    <td><code>mkapk build -arch aarch64</code></td>
+                </tr>
+                <tr>
+                    <td><code>-ndk-all</code></td>
+                    <td>Build universal APK + split per-architecture</td>
+                    <td><code>mkapk build -ndk-all</code></td>
+                </tr>
+                <tr>
+                    <td><code>-no-obs</code></td>
+                    <td>Disable obfuscation (release builds only)</td>
+                    <td><code>mkapk build -release -no-obs</code></td>
+                </tr>
+            </table>
+        </div>
+
+        <h4>Build Examples</h4>
+
+        <p><strong>Debug build (default):</strong></p>
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build
+        </div>
+        <p>Creates a debug APK with symbols and no optimization.</p>
+
+        <p><strong>Release build:</strong></p>
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build -release
+        </div>
+        <p>Creates an optimized, obfuscated APK ready for distribution.</p>
+
+        <p><strong>Full rebuild:</strong></p>
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build -all
+        </div>
+        <p>Ignores cache and recompiles everything.</p>
+
+        <p><strong>Multi-architecture:</strong></p>
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build -ndk-all
+        </div>
+        <p>Builds APKs for armv7, arm64, x86, x86_64, plus universal.</p>
+
+        <p><strong>Specific architecture:</strong></p>
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build -arch armv7a-linux-androideabi
+        </div>
+        <p>Builds only for 32-bit ARM devices.</p>
+
+        <p><strong>Release without obfuscation:</strong></p>
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk build -release -no-obs
+        </div>
+        <p>Production build that keeps readable class/method names (debugging).</p>
+
+        <h3>mkapk clean</h3>
+        <p>Remove build artifacts while preserving keystores.</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk clean
+        </div>
+
+        <p><strong>What it removes:</strong></p>
+        <ul>
+            <li>Compiled classes and DEX files</li>
+            <li>Generated APKs</li>
+            <li>Native object files</li>
+            <li>Build cache and temporary files</li>
+        </ul>
+
+        <p><strong>What it preserves:</strong></p>
+        <ul>
+            <li>Keystores (.jks, .keystore files)</li>
+            <li>Source code</li>
+            <li>Configuration files</li>
+        </ul>
+
+        <h3>mkapk install &lt;plugin.pl&gt;</h3>
+        <p>Install a language plugin (unsigned .pl package).</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk install my-plugin.pl
+        </div>
+
+        <p>The plugin must be:</p>
+        <ul>
+            <li>A signed ZIP archive</li>
+            <li>Contain plugin.json manifest</li>
+            <li>Signed with valid cryptographic signature</li>
+        </ul>
+
+        <h3>mkapk uninstall &lt;plugin_name&gt;</h3>
+        <p>Remove an installed language plugin.</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk uninstall rust
+        </div>
+
+        <h3>mkapk help</h3>
+        <p>Display help information and available commands.</p>
+
+        <div class="command-box">
+            <span class="prompt">$</span> mkapk help
+        </div>
+
+        <h2>Output Files</h2>
+        <p>After building, you'll find these files in the <code>bin/</code> directory:</p>
+
+        <div class="table-responsive">
+            <table>
+                <tr>
+                    <th>File</th>
+                    <th>Purpose</th>
+                </tr>
+                <tr>
+                    <td><code>MyApp.debug.apk</code></td>
+                    <td>Debug build for development/testing</td>
+                </tr>
+                <tr>
+                    <td><code>MyApp.release.apk</code></td>
+                    <td>Release build for distribution</td>
+                </tr>
+                <tr>
+                    <td><code>MyApp-universal.apk</code></td>
+                    <td>Universal APK with all architectures (large file)</td>
+                </tr>
+                <tr>
+                    <td><code>MyApp-armv7.apk</code></td>
+                    <td>ARM 32-bit specific APK</td>
+                </tr>
+                <tr>
+                    <td><code>MyApp-arm64.apk</code></td>
+                    <td>ARM 64-bit specific APK</td>
+                </tr>
+                <tr>
+                    <td><code>MyApp-x86.apk</code></td>
+                    <td>x86 32-bit specific APK</td>
+                </tr>
+                <tr>
+                    <td><code>MyApp-x86_64.apk</code></td>
+                    <td>x86 64-bit specific APK</td>
+                </tr>
+            </table>
+        </div>
+
+        <h2>Build Process Workflow</h2>
+        <div class="stepper">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>Change Detection</h4>
+                    <p>mkapk scans and hashes all source files to detect changes since last build.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>Resource Compilation</h4>
+                    <p>AAPT2 compiles Android resources and generates R.java</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>Source Compilation</h4>
+                    <p>Javac compiles Java/Kotlin code → .class files</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h4>Native Compilation (if applicable)</h4>
+                    <p>Clang compiles C/C++ code → .so libraries (per-ABI)</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">5</div>
+                <div class="step-content">
+                    <h4>DEX Conversion</h4>
+                    <p>D8/R8 converts .class files → classes.dex</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">6</div>
+                <div class="step-content">
+                    <h4>APK Packaging</h4>
+                    <p>Zip assembles DEX, resources, native libraries → APK</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">7</div>
+                <div class="step-content">
+                    <h4>Alignment & Signing</h4>
+                    <p>Zipalign optimizes layout, apksigner signs with keystore</p>
+                </div>
+            </div>
+        </div>
+
+        <h2>Installation on Device</h2>
+
+        <h3>Using ADB</h3>
+        <div class="command-box">
+            <span class="prompt">$</span> adb install bin/MyApp.debug.apk
+        </div>
+
+        <h3>Direct Installation (from Termux)</h3>
+        <div class="command-box">
+            <span class="prompt">$</span> pm install -r bin/MyApp.debug.apk
+        </div>
+
+        <h3>Upgrade Existing App</h3>
+        <div class="command-box">
+            <span class="prompt">$</span> adb install -r bin/MyApp.debug.apk
+        </div>
+
+        <h2>Tips & Tricks</h2>
+        <ul>
+            <li><strong>Fast iteration:</strong> Use debug builds; incremental compilation speeds up rebuilds</li>
+            <li><strong>Test all ABIs:</strong> Before releasing, test on different device architectures</li>
+            <li><strong>Validate configuration:</strong> Check config.json for typos and correct paths</li>
+            <li><strong>Use smaller test apps:</strong> First builds take 124-150s; reduce project size for faster iteration</li>
+            <li><strong>Monitor storage:</strong> Builds can create large intermediate files; keep 1-5 GB free</li>
+        </ul>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>About mkapk</h4>
+                    <p>A lightweight Android Build System for Termux.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="installation.html">Installation</a></li>
+                        <li><a href="quickstart.html">Quick Start</a></li>
+                        <li><a href="configuration.html">Configuration</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank">GitHub</a></li>
+                        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Nirbhay-Kumar-Developer. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <div class="back-to-top" id="backToTop">
+        <i class="fas fa-arrow-up"></i>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

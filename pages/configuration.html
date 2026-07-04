@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration Guide - mkapk</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html">
+                    <i class="fas fa-mobile-alt"></i>
+                    <span>mkapk</span>
+                </a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="../index.html">Home</a></li>
+                <li class="dropdown">
+                    <a href="#">Docs</a>
+                    <div class="dropdown-menu">
+                        <a href="installation.html">Installation</a>
+                        <a href="quickstart.html">Quick Start</a>
+                        <a href="configuration.html">Configuration</a>
+                        <a href="usage-guide.html">Usage Guide</a>                        
+                    </div>
+                </li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                
+                <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank"><i class="fab fa-github"></i> GitHub</a></li>
+            </ul>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container">
+            <h1>Configuration Guide</h1>
+            <p>Customize your mkapk project settings</p>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+        <ul class="breadcrumb">
+            <li><a href="../index.html">Home</a></li>
+            <li>Configuration</li>
+        </ul>
+
+        <h2>config.json Reference</h2>
+        <p>The <code>config.json</code> file is the heart of your mkapk project. It defines all build settings and project structure.</p>
+
+        <h3>Basic Structure</h3>
+        <pre><code>{
+  "NAME": "MyApplication",
+  "BIN_DIR": "./bin",
+  "SRC_DIR": "./src/main",
+  "RES_DIR": "./src/res",
+  "ASSETS_DIR": "./assets",
+  "MANIFEST": "./src/main/AndroidManifest.xml",
+  "SDK_ROOT": "~/android-sdk",
+  "TARGET_SDK": "34",
+  "JAVA_VERSION": "17",
+  "COMPOSE_PLUGIN": "",
+  "PROGUARD_RULES": "./proguard-rules.pro",
+  "KEYSTORE": "~/.android/debug.keystore",
+  "KEYSTORE_ALIAS": "androiddebugkey",
+  "NDK_BIN": "~/android-ndk/toolchains/llvm/prebuilt/linux-aarch64/bin",
+  "SYSTEM_SHARED_LIBS": ["c++_shared"],
+  "NATIVE_TARGETS": []
+}</code></pre>
+
+        <h2>Field Reference</h2>
+
+        <div class="table-responsive">
+            <table>
+                <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><code>NAME</code></td>
+                    <td>String</td>
+                    <td>Yes</td>
+                    <td>Application name (used for APK filename)</td>
+                </tr>
+                <tr>
+                    <td><code>BIN_DIR</code></td>
+                    <td>String (path)</td>
+                    <td>Yes</td>
+                    <td>Build output directory</td>
+                </tr>
+                <tr>
+                    <td><code>SRC_DIR</code></td>
+                    <td>String (path)</td>
+                    <td>Yes</td>
+                    <td>Source code directory (Java/Kotlin)</td>
+                </tr>
+                <tr>
+                    <td><code>RES_DIR</code></td>
+                    <td>String (path)</td>
+                    <td>Yes</td>
+                    <td>Android resources directory</td>
+                </tr>
+                <tr>
+                    <td><code>ASSETS_DIR</code></td>
+                    <td>String (path)</td>
+                    <td>No</td>
+                    <td>App assets directory (images, data files)</td>
+                </tr>
+                <tr>
+                    <td><code>MANIFEST</code></td>
+                    <td>String (path)</td>
+                    <td>Yes</td>
+                    <td>Path to AndroidManifest.xml</td>
+                </tr>
+                <tr>
+                    <td><code>SDK_ROOT</code></td>
+                    <td>String (path)</td>
+                    <td>Yes</td>
+                    <td>Android SDK root directory</td>
+                </tr>
+                <tr>
+                    <td><code>TARGET_SDK</code></td>
+                    <td>String (number)</td>
+                    <td>Yes</td>
+                    <td>Target API level (e.g., "34" for Android 14)</td>
+                </tr>
+                <tr>
+                    <td><code>JAVA_VERSION</code></td>
+                    <td>String (number)</td>
+                    <td>No</td>
+                    <td>Java source compatibility (default: "17")</td>
+                </tr>
+                <tr>
+                    <td><code>COMPOSE_PLUGIN</code></td>
+                    <td>String</td>
+                    <td>No</td>
+                    <td>Jetpack Compose plugin name</td>
+                </tr>
+                <tr>
+                    <td><code>PROGUARD_RULES</code></td>
+                    <td>String (path)</td>
+                    <td>No</td>
+                    <td>ProGuard/R8 obfuscation rules file</td>
+                </tr>
+                <tr>
+                    <td><code>KEYSTORE</code></td>
+                    <td>String (path)</td>
+                    <td>Yes (for release)</td>
+                    <td>Release keystore file path</td>
+                </tr>
+                <tr>
+                    <td><code>KEYSTORE_ALIAS</code></td>
+                    <td>String</td>
+                    <td>Yes (for release)</td>
+                    <td>Keystore certificate alias</td>
+                </tr>
+                <tr>
+                    <td><code>NDK_BIN</code></td>
+                    <td>String (path)</td>
+                    <td>No</td>
+                    <td>Android NDK bin directory (for native compilation)</td>
+                </tr>
+                <tr>
+                    <td><code>SYSTEM_SHARED_LIBS</code></td>
+                    <td>Array[String]</td>
+                    <td>No</td>
+                    <td>System libraries to include (e.g., c++_shared, log)</td>
+                </tr>
+                <tr>
+                    <td><code>NATIVE_TARGETS</code></td>
+                    <td>Array[Object]</td>
+                    <td>No</td>
+                    <td>Native compilation targets (see below)</td>
+                </tr>
+            </table>
+        </div>
+
+        <h2>Native Targets Configuration</h2>
+        <p>Define native C/C++ compilation targets:</p>
+
+        <pre><code>"NATIVE_TARGETS": [
+  {
+    "NAME": "mynativelib",
+    "SOURCES": [
+      "src/native/main.cpp",
+      "src/native/utils.cpp"
+    ],
+    "EXTRA_FLAGS": [
+      "-fexceptions",
+      "-frtti",
+      "-std=c++17"
+    ]
+  }
+]</code></pre>
+
+        <h3>Native Target Fields</h3>
+        <div class="table-responsive">
+            <table>
+                <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><code>NAME</code></td>
+                    <td>String</td>
+                    <td>Library name (output: libnamehere.so)</td>
+                </tr>
+                <tr>
+                    <td><code>SOURCES</code></td>
+                    <td>Array[String]</td>
+                    <td>List of .cpp, .c, .h files to compile</td>
+                </tr>
+                <tr>
+                    <td><code>EXTRA_FLAGS</code></td>
+                    <td>Array[String]</td>
+                    <td>Additional compiler flags (e.g., -std=c++17)</td>
+                </tr>
+            </table>
+        </div>
+
+        <h2>System Shared Libraries</h2>
+        <p>Specify shared libraries to include in your APK:</p>
+
+        <pre><code>"SYSTEM_SHARED_LIBS": [
+  "c++_shared",
+  "log",
+  "android",
+  "EGL",
+  "GLESv2"
+]</code></pre>      
+
+        <h2>ProGuard Configuration</h2>
+        <p>Create a <code>proguard-rules.pro</code> file for code obfuscation (release builds only):</p>
+
+        <pre><code># Keep all public classes and methods
+-keep public class * {
+    public *;
+}
+
+# Keep native methods
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# Keep enumerations
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+
+# Keep activity names (required for app to run)
+-keep public class * extends android.app.Activity
+-keep public class * extends android.app.Service
+-keep public class * extends android.content.BroadcastReceiver</code></pre>
+
+        <h2>Example Configurations</h2>
+
+        <h3>Simple Java App</h3>
+        <pre><code>{
+  "NAME": "SimpleApp",
+  "BIN_DIR": "./bin",
+  "SRC_DIR": "./src/main",
+  "RES_DIR": "./src/res",
+  "MANIFEST": "./src/main/AndroidManifest.xml",
+  "SDK_ROOT": "~/android-sdk",
+  "TARGET_SDK": "34",
+  "JAVA_VERSION": "17"
+}</code></pre>
+
+        <h3>App with Native Code</h3>
+        <pre><code>{
+  "NAME": "NativeApp",
+  "BIN_DIR": "./bin",
+  "SRC_DIR": "./src/main",
+  "RES_DIR": "./src/res",
+  "MANIFEST": "./src/main/AndroidManifest.xml",
+  "SDK_ROOT": "~/android-sdk",
+  "TARGET_SDK": "34",
+  "JAVA_VERSION": "17",
+  "NDK_BIN": "~/android-ndk/toolchains/llvm/prebuilt/linux-aarch64/bin",
+  "SYSTEM_SHARED_LIBS": ["c++_shared", "log"],
+  "NATIVE_TARGETS": [
+    {
+      "NAME": "mylib",
+      "SOURCES": ["src/native/main.cpp"],
+      "EXTRA_FLAGS": ["-std=c++17"]
+    }
+  ]
+}</code></pre>
+
+        <h3>Release Build Setup</h3>
+        <pre><code>{
+  "NAME": "ProductionApp",
+  "BIN_DIR": "./bin",
+  "SRC_DIR": "./src/main",
+  "RES_DIR": "./src/res",
+  "MANIFEST": "./src/main/AndroidManifest.xml",
+  "SDK_ROOT": "~/android-sdk",
+  "TARGET_SDK": "34",
+  "JAVA_VERSION": "17",
+  "PROGUARD_RULES": "./proguard-rules.pro",
+  "KEYSTORE": "~/my-release.keystore",
+  "KEYSTORE_ALIAS": "my-key-alias"
+}</code></pre>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>About mkapk</h4>
+                    <p>A lightweight Android Build System for Termux.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="installation.html">Installation</a></li>
+                        <li><a href="quickstart.html">Quick Start</a></li>
+                        <li><a href="configuration.html">Configuration</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank">GitHub</a></li>
+                        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Nirbhay-Kumar-Developer. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <div class="back-to-top" id="backToTop">
+        <i class="fas fa-arrow-up"></i>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

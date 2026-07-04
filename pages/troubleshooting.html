@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Troubleshooting - mkapk</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/responsive.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html">
+                    <i class="fas fa-mobile-alt"></i>
+                    <span>mkapk</span>
+                </a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="../index.html">Home</a></li>
+                <li class="dropdown">
+                    <a href="#">Docs</a>
+                    <div class="dropdown-menu">
+                        <a href="installation.html">Installation</a>
+                        <a href="quickstart.html">Quick Start</a>
+                        <a href="configuration.html">Configuration</a>
+                        <a href="usage-guide.html">Usage Guide</a>
+                        
+                    </div>
+                </li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                
+                <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank"><i class="fab fa-github"></i> GitHub</a></li>
+            </ul>
+            <div class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container">
+            <h1>Troubleshooting Guide</h1>
+            <p>Solutions to common problems and errors</p>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+        <ul class="breadcrumb">
+            <li><a href="../index.html">Home</a></li>
+            <li>Troubleshooting</li>
+        </ul>
+
+        <h2>Installation Issues</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Error:</strong> "command not found: mkapk"</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Causes:</strong> Binary not installed or not in PATH</p>
+                <p><strong>Solutions:</strong></p>
+                <ol>
+                    <li>Verify installation:
+                        <pre><code>which mkapk</code></pre>
+                    </li>
+                    <li>If empty, reinstall:
+                        <pre><code>dpkg --install ./mkapk-aarch64.deb</code></pre>
+                    </li>
+                    <li>Check permissions:
+                        <pre><code>chmod +x $PREFIX/bin/mkapk</code></pre>
+                    </li>                  
+                </ol>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Error:</strong> "Missing dependency: openjdk-21"</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Solution:</strong> Install OpenJDK 21</p>
+                <pre><code>apt install openjdk-21 -y</code></pre>
+                <p>Then verify:</p>
+                <pre><code>java -version</code></pre>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Error:</strong> "Permission denied" when running mkapk</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Solution:</strong> Add execute permission to binary</p>
+                <pre><code>chmod +x $PREFIX/bin/mkapk</code></pre>
+            </div>
+        </div>
+
+        <h2>Build Errors</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Error:</strong> "config.json not found"</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Cause:</strong> Project not initialized</p>
+                <p><strong>Solution:</strong> Initialize project first</p>
+                <pre><code>mkapk init</code></pre>
+                <p>Then configure <code>config.json</code> with your project settings.</p>
+            </div>
+        </div>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Error:</strong> "Architecture Build Error: android.jar not found"</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Cause:</strong> SDK_ROOT or TARGET_SDK incorrectly configured</p>
+                <p><strong>Solution:</strong> Fix config.json</p>
+                <pre><code>{
+  "SDK_ROOT": "/path/to/android-sdk",
+  "TARGET_SDK": "34"
+}</code></pre>
+                <p>Verify the path exists:</p>
+                <pre><code>ls ~/android-sdk/platforms/android-34/android.jar</code></pre>
+            </div>
+        </div>        
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Error:</strong> "Linking failed for libname.so"</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Cause:</strong> Native linking error (missing symbols, wrong ABI)</p>
+                <p><strong>Solutions:</strong></p>
+                <ol>
+                    <li>Check for missing dependencies in EXTRA_FLAGS:
+                        <pre><code>"EXTRA_FLAGS": ["-lm", "-ldl"]</code></pre>
+                    </li>
+                    <li>Verify all source files are included</li>
+                    <li>Check C++ flags are correct:
+                        <pre><code>"EXTRA_FLAGS": ["-std=c++17", "-fexceptions"]</code></pre>
+                    </li>
+                </ol>
+            </div>
+        </div>        
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Error:</strong> "ApkSigner runtime verification failed"</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Cause:</strong> Keystore issues (wrong password, missing alias, corrupted file)</p>
+                <p><strong>Solutions:</strong></p>
+                <ol>
+                    <li>For debug builds, mkapk creates debug.keystore automatically</li>
+                    <li>For release, verify keystore exists:
+                        <pre><code>keytool -list -v -keystore ~/my-release.keystore</code></pre>
+                    </li>
+                    <li>Check config.json KEYSTORE_ALIAS matches actual alias</li>
+                    <li>If corrupted, recreate keystore (this will invalidate old signatures)</li>
+                </ol>
+            </div>
+        </div>
+
+        
+
+        <h2>APK Issues</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Issue:</strong> "Unable to load native library" error</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Cause:</strong> Native library missing or wrong ABI</p>
+                <p><strong>Solutions:</strong></p>
+                <ol>
+                    <li>Verify library compiled for correct ABI:
+                        <pre><code>file lib/arm64-v8a/libmylib.so</code></pre>
+                    </li>
+                    <li>Match device ABI:
+                        <pre><code>adb shell getprop ro.product.cpu.abi</code></pre>
+                    </li>
+                    <li>Build for correct ABI:
+                        <pre><code>mkapk build -arch aarch64-linux-android</code></pre>
+                    </li>
+                    <li>Check library is included in APK:
+                        <pre><code>unzip -l MyApp.apk | grep .so</code></pre>
+                    </li>
+                </ol>
+            </div>
+        </div>
+
+        <h2>State & Cache Issues</h2>
+
+        <div class="faq-item">
+            <div class="faq-question">
+                <span><strong>Issue:</strong> Build fails after deleting a file</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div class="faq-answer">
+                <p><strong>Solution:</strong> Clean and rebuild</p>
+                <pre><code>mkapk clean
+mkapk build</code></pre>
+                <p>This resets the incremental build cache.</p>
+            </div>
+        </div>       
+
+        <h2>Getting Help</h2>
+        <p>If you can't resolve your issue:</p>
+        <ol>
+            <li>Check the <a href="faq.html">FAQ</a> for common questions</li>
+            <li>Search <a href="https://github.com/Nirbhay-Kumar-Developer/mkapk/issues" target="_blank">GitHub Issues</a></li>
+            <li>Open a new issue with:
+                <ul>
+                    <li>Full error message</li>
+                    <li>config.json (sanitized)</li>
+                    <li>Device info: <code>uname -a</code>, Android version</li>
+                    <li>Termux version: <code>termux-info</code></li>
+                    <li>Steps to reproduce</li>
+                </ul>
+            </li>
+        </ol>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>About mkapk</h4>
+                    <p>A lightweight Android Build System for Termux.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="installation.html">Installation</a></li>
+                        <li><a href="quickstart.html">Quick Start</a></li>
+                        <li><a href="configuration.html">Configuration</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank">GitHub</a></li>
+                        <li><a href="troubleshooting.html">Troubleshooting</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Nirbhay-Kumar-Developer. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <div class="back-to-top" id="backToTop">
+        <i class="fas fa-arrow-up"></i>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
