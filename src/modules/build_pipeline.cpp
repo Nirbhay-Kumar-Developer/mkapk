@@ -6,6 +6,8 @@
 #include <future>  
 #include <map>
 #include <functional>
+#include <stdexcept>
+#include <exception>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
@@ -18,7 +20,7 @@ namespace fs = std::filesystem;
  * Handles concurrent scheduling across Resource, Native NDK, and JVM layers.
  */
 std::string perform_build(const std::vector<std::string>& raw_args, const MkapkConfig& config) {
-    // 1. Setup Environment
+    // 1. Setup Environment & Sanitization
     std::string proj_name = config.project_name;
     fs::path bin_dir = fs::absolute(MkapkEnv::resolve_path(config.bin_dir));
     fs::path src_dir = fs::absolute(MkapkEnv::resolve_path(config.src_dir));
@@ -78,7 +80,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     bool resources_triggered = (diff.res_changed || diff.manifest_changed || force_all);
 
     // ============================================================================
-    // PARALLEL TASK ORCHESTRATION LAYER
+    // PARALLEL TASK ORCHESTRATION LAYER (ANTI-DEADLOCK POOLING)
     // ============================================================================
 
     // WORKER THREAD A: Resource Compilation & Base Layout Processing
@@ -98,7 +100,6 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         if (!diff.changed_files["native"].empty() || force_all) {
             UI::stage(UI::Msg::NATIVE_STAGE, "Compiling multi-architecture variants");
             
-            // 1. Pass the pre-parsed native targets array directly from the config struct
             compile_native(config.ndk_bin, 
                            src_dir, 
                            bin_dir, 
@@ -107,45 +108,95 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
                            run_func, 
                            diff.changed_files["native"], 
                            config.native_targets);
-            
+        }
+        
+        // [BUG FIX]: System libraries are placed independently of native source compilation.
+        // This ensures prebuilt libraries (libchronork.so) are restored after 'mkapk clean'.
+        if (!config.system_shared_libs.empty() || !diff.changed_files["native"].empty() || force_all) {
             auto_place_system_libraries(config, bin_dir, compile_architectures);
         }
     });
 
+    // ============================================================================
+    // THREAD SYNCHRONIZATION & EXCEPTION ROUTING
+    // ============================================================================
+    std::exception_ptr pipeline_err = nullptr;
+    std::string err_stage;
+
+    // BARRIER 1: Wait for resources. Must complete before JVM starts.
+    try {
+        resource_worker.get(); 
+    } catch (...) {
+        pipeline_err = std::current_exception();
+        err_stage = "Resource pipeline failure";
+    }
+
     // WORKER THREAD C: Unified JVM Source Compilation & Cascaded Dexing
-    auto jvm_worker = std::async(std::launch::async, [&]() {
-        if (diff.src_changed || force_all) {
-            UI::stage("Source Pipeline", "Analyzing active code changes");
-        }
-        auto [java_out, dex_cache] = compile_source_logic(config, tools, active_plugins, android_jar, bin_dir, 
-                                                        diff.changed_files, diff.deleted_files, 
-                                                        (diff.res_changed || force_all), run_func);
-
-        if (is_release) {
-            UI::stage("Minification", "Running R8 bytecode optimization");
-            run_dex_r8(tools["r8"], android_jar, config, bin_dir, run_func);
-        } else {
-            UI::stage("Dexing", "Running D8 incremental translation");
-            std::vector<fs::path> unified_dex_targets;
-            for (const auto& [lang, files] : diff.changed_files) {
-                auto plug_it = active_plugins.find("." + lang);
-                if (lang == "java" || lang == "kotlin" || (plug_it != active_plugins.end() && plug_it->second.output_type == "jvm")) {
-                    for (const auto& f : files) unified_dex_targets.push_back(f);
-                }
+    // Only spawn this thread if the resource generation succeeded.
+    std::future<void> jvm_worker;
+    if (!pipeline_err) {
+        jvm_worker = std::async(std::launch::async, [&]() {
+            if (diff.src_changed || force_all) {
+                UI::stage("Source Pipeline", "Analyzing active code changes");
             }
+            
+            auto [java_out, dex_cache] = compile_source_logic(config, tools, active_plugins, android_jar, bin_dir, 
+                                                            diff.changed_files, diff.deleted_files, 
+                                                            (diff.res_changed || force_all), run_func);
 
-            run_incremental_dex(tools["d8"], android_jar, src_dir, java_out, dex_cache, 
-                               unified_dex_targets, run_func);
-            run_dex_d8(tools["d8"], android_jar, bin_dir, dex_cache, run_func);
+            if (is_release) {
+                UI::stage("Minification", "Running R8 bytecode optimization");
+                run_dex_r8(tools["r8"], android_jar, config, bin_dir, run_func);
+            } else {
+                UI::stage("Dexing", "Running D8 incremental translation");
+                std::vector<fs::path> unified_dex_targets;
+                for (const auto& [lang, files] : diff.changed_files) {
+                    auto plug_it = active_plugins.find("." + lang);
+                    if (lang == "java" || lang == "kotlin" || (plug_it != active_plugins.end() && plug_it->second.output_type == "jvm")) {
+                        for (const auto& f : files) unified_dex_targets.push_back(f);
+                    }
+                }
+
+                run_incremental_dex(tools["d8"], android_jar, src_dir, java_out, dex_cache, 
+                                   unified_dex_targets, run_func);
+                run_dex_d8(tools["d8"], android_jar, bin_dir, dex_cache, run_func);
+            }
+        });
+    }
+
+    // BARRIER 2: Ensure Native Compiler finishes securely
+    try {
+        native_worker.get();   
+    } catch (...) {
+        if (!pipeline_err) {
+            pipeline_err = std::current_exception();
+            err_stage = "Native compilation failure";
         }
-    });
+    }
 
-    // ============================================================================
-    // SYNCHRONIZATION BARRIER BLOCK
-    // ============================================================================
-    resource_worker.get(); 
-    native_worker.get();   
-    jvm_worker.get();      
+    // BARRIER 3: Ensure JVM Compiler finishes securely
+    if (jvm_worker.valid()) {
+        try {
+            jvm_worker.get();      
+        } catch (...) {
+            if (!pipeline_err) {
+                pipeline_err = std::current_exception();
+                err_stage = "JVM pipeline failure";
+            }
+        }
+    }
+
+    // FINAL UNWIND: If any thread threw an error, surface it now after 
+    // guaranteeing all active background processes have cleanly terminated.
+    if (pipeline_err) {
+        try {
+            std::rethrow_exception(pipeline_err);
+        } catch (const std::exception& e) {
+            throw std::runtime_error(err_stage + ": " + e.what());
+        } catch (...) {
+            throw std::runtime_error(err_stage + ": Unknown fatal synchronization error.");
+        }
+    }
 
     // ============================================================================
     // MULTI-APK PACKAGING ITERATION LOOP (Runs on Main Thread)
@@ -155,8 +206,12 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     fs::path base_unsigned_apk = bin_dir / "unsigned.apk";
     
     if (!resources_triggered && !fs::exists(base_unsigned_apk)) {
-        UI::warn("Base container container missing. Forcing resource link pass resolution...");
+        UI::warn("Base container missing. Forcing resource link pass resolution...");
         link_manifest(tools["aapt2"], base_unsigned_apk, android_jar, manifest_path, bin_dir, src_dir, run_func, !is_release);
+    }
+
+    if (!fs::exists(base_unsigned_apk)) {
+        throw std::runtime_error("Fatal Build Error: Base unsigned APK container is missing. Halting packaging loop.");
     }
 
     std::pair<std::string, std::string> ks_info = is_release ? 
@@ -186,6 +241,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         UI::stage(UI::Msg::PACK_STAGE, "Variant target: " + task.filename_suffix);
         
         fs::path loop_unsigned = bin_dir / ("unsigned" + task.filename_suffix + ".apk");
+        
         fs::copy_file(base_unsigned_apk, loop_unsigned, fs::copy_options::overwrite_existing);
 
         inject_assets_and_dex(loop_unsigned, bin_dir, config.assets_dir, task.target_abis, is_release);

@@ -77,33 +77,50 @@ void link_manifest(
 {
     UI::stage("Resource Linker", debug ? "Assembling development variant (DEBUG)" : "Assembling production variant");
 
+    // 1. Dependency Existence Checks (Robustness)
+    // Prevents AAPT2 from executing and returning obscure backend errors if core files are missing.
+    if (!fs::exists(manifest)) {
+        throw std::runtime_error("Manifest missing: Cannot link resources without a valid AndroidManifest.xml at " + manifest.string());
+    }
+    if (!fs::exists(android_jar)) {
+        throw std::runtime_error("SDK missing: android.jar not found at " + android_jar.string());
+    }
+
     fs::path flat_dir = bin_dir / "flat_res";
     if (!fs::exists(flat_dir) || fs::is_empty(flat_dir)) {
         throw std::runtime_error("Compilation path context empty: No verified intermediate .flat asset data ready for link passes.");
     }
 
-    // Base link command
+    // 2. Generation Directory Fix (Bug Patch)
+    // Ensures R.java is output to the bin directory where the Java compiler expects it, 
+    // rather than polluting the user's source tree.
+    fs::path gen_dir = bin_dir / "gen";
+    fs::create_directories(gen_dir);
+
+    // 3. Command Construction
     std::vector<std::string> args = {
         AAPT2, "link",
         "-o", fs::absolute(unsigned_apk).string(),
         "-I", fs::absolute(android_jar).string(),
         "--manifest", fs::absolute(manifest).string(),
-        "--java", fs::absolute(src_dir).string(),
+        "--java", fs::absolute(gen_dir).string(), // Patched: Targets bin_dir/gen
         "--auto-add-overlay"
     };
 
-    // Gather all .flat files produced in Step i
+    // 4. Secure File Gathering
+    // Added is_regular_file() check to prevent AAPT2 from choking on rogue directories.
     for (const auto& entry : fs::directory_iterator(flat_dir)) {
-        if (entry.path().extension() == ".flat") {
+        if (entry.is_regular_file() && entry.path().extension() == ".flat") {
             args.push_back(fs::absolute(entry.path()).string());
         }
     }
 
-    if (debug) args.push_back("--debug-mode");
+    if (debug) {
+        args.push_back("--debug-mode");
+    }
 
     run_func(args, "Manifest asset linking generation dropped errors.");
 }
-
 
 fs::path obfuscate_resources(
     const std::string& java_bin,

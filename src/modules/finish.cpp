@@ -85,11 +85,6 @@ std::vector<std::string> parse_configured_libraries(const std::string& config_co
 void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_dir, const std::vector<std::string>& arch_list) {
     // Direct lookup from the pre-parsed configuration object array vector!
     std::vector<std::string> targeted_libs = config.system_shared_libs;
-    
-    // Always guarantee libc++_shared is present as a baseline dependency
-    if (std::find(targeted_libs.begin(), targeted_libs.end(), "c++_shared") == targeted_libs.end()) {
-        targeted_libs.push_back("c++_shared");
-    }
 
     UI::stage("NDK Syslibs", "Auto-resolving system shared dependencies from Termux ndk-multilib");
 
