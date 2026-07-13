@@ -23,7 +23,7 @@ export PATH="$JAVA_HOME/bin:$PATH"
 # --- 2. Compile C++ Native Engine ---
 echo ">> Running Makefile..."
 make clean
-make -j$(nproc)
+make -j"$(nproc)"
 
 # --- 3. Compile Java Coordinator ---
 echo ">> Compiling Java Coordinator..."
