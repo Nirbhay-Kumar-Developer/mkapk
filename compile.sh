@@ -17,7 +17,7 @@ cp -r "$STORAGE_PATH/." "$LOCAL_PATH/"
 cd "$LOCAL_PATH"
 
 # --- 1. Environment Setup ---
-export JAVA_HOME=${JAVA_HOME:-"$PREFIX/lib/jvm/java-21-openjdk"}
+export JAVA_HOME="${JAVA_HOME:-"$PREFIX/lib/jvm/java-21-openjdk"}"
 export PATH="$JAVA_HOME/bin:$PATH"
 
 # --- 2. Compile C++ Native Engine ---
@@ -35,7 +35,7 @@ mkdir -p "$JAVA_BIN_DIR"
 
 # Find all .java files and compile them
 find "$JAVA_SRC_DIR" -name "*.java" > scripts/sources.txt
-javac -d "$JAVA_BIN_DIR" @scripts/sources.txt -cp $CLASS_PATH
+javac -d "$JAVA_BIN_DIR" @scripts/sources.txt -cp "$CLASS_PATH"
 
 # Create the JAR file
 jar cvf "build/$JAR_NAME" -C "$JAVA_BIN_DIR" .
