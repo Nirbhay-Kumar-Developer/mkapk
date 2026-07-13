@@ -346,6 +346,7 @@ void sign_apk(const std::string& APKSIGNER, const fs::path& final_apk,
         throw std::runtime_error("Security certificate footprint missing: Security profile store file not verified at destination context: " + ks_path.string());
     }
 
+    // Base positional arguments matching target profile signatures
     std::vector<std::string> args = {
         APKSIGNER, "sign",
         "--ks", ks_path.string(),
@@ -353,14 +354,18 @@ void sign_apk(const std::string& APKSIGNER, const fs::path& final_apk,
         "--out", final_apk.string()
     };
 
+    // If handling the localized automated debug profile layout
     if (alias == "androiddebugkey") {
         args.push_back("--ks-pass");
         args.push_back("pass:android");
         args.push_back("--key-pass");
         args.push_back("pass:android");
-    }
-
+    } 
+                        
     args.push_back(aligned_apk.string());
+    
+    // Executes cleanly via native fork/exec (thanks to our smart_run patch),
+    // inheriting the interactive console shell.
     run_func(args, "ApkSigner runtime verification tracking block dropped fatal signature errors.");
 
     if (fs::exists(aligned_apk)) fs::remove(aligned_apk);

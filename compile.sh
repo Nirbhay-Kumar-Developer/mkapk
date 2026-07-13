@@ -79,6 +79,7 @@ echo ">> Installing locally..."
 
 # Copy the finished .deb back to your Programming folder
 cp "${PKG_NAME}.deb" "$STORAGE_PATH/"
+dpkg --install mkapk-aarch64.deb
 
 echo "🚀 Success!"
 echo "Binary: $PREFIX/usr/bin/mkapk"

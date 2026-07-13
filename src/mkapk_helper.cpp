@@ -18,14 +18,20 @@
 void smart_run(const std::vector<std::string>& args, const std::string& err_msg) {
     if (args.empty()) return;
 
-    // Lightweight path filename resolution without full std::filesystem compilation overhead
     std::string tool_path = args[0];
     size_t last_slash = tool_path.find_last_of('/');
     std::string tool_name = (last_slash == std::string::npos) ? tool_path : tool_path.substr(last_slash + 1);
 
+    // [ANTI-FREEZE PATCH]: Bypass the isolated Java Daemon for apksigner on Release builds.
+    // This allows the native fork/exec child process to cleanly inherit the parent's terminal 
+    // stdin context so you can type your password securely.
+    bool is_release_signing = (tool_name == "apksigner" && 
+                               std::find(args.begin(), args.end(), "androiddebugkey") == args.end());
+
     bool use_daemon = (tool_name == "d8" || tool_name == "r8" || 
                        tool_name == "javac" || tool_name == "resguard" ||
-                       tool_name == "apksigner" || tool_name == "kotlinc");
+                       (tool_name == "apksigner" && !is_release_signing) || 
+                       tool_name == "kotlinc");
 
     if (use_daemon) {
         std::vector<std::string> daemon_args = args;
@@ -34,6 +40,7 @@ void smart_run(const std::vector<std::string>& args, const std::string& err_msg)
     } else {
         pid_t pid = fork();
         if (pid == 0) {
+            // Child process inherits standard stdin/stdout/stderr automatically
             std::vector<char*> c_args;
             for (const auto& arg : args) c_args.push_back(const_cast<char*>(arg.c_str()));
             c_args.push_back(nullptr);
