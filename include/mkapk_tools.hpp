@@ -132,6 +132,13 @@ void link_manifest(
     bool debug = false
 );
 
+fs::path obfuscate_resources(
+    const std::string& RESGUARD_TOOL,
+    const fs::path& in_apk,
+    const fs::path& build_dir,
+    RunFunc run_func
+);
+
 /**
  * ============================================================================
  * SECTION 5: NATIVE COMPILATION (NDK)

@@ -107,12 +107,28 @@ void run_dex_r8(
         std::exit(1); 
     }
 
+    // --- SOLUTION 3: RESOLVE JETBRAINS ANNOTATIONS PATH ---
+    const char* prefix_env = std::getenv("PREFIX");
+    fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
+    fs::path annotations_jar = kotlin_lib_root / "annotations-13.0.jar"; 
+
     std::vector<std::string> args = {
         R8_TOOL,
         "--release",
-        "--lib", fs::absolute(android_jar).string(),
-        "--output", bin_dir_path.string()
+        "--lib", fs::absolute(android_jar).string()
     };
+
+    // If the companion annotations archive payload exists, append it as a reference graph library
+    if (fs::exists(annotations_jar)) {
+        args.push_back("--lib");
+        args.push_back(fs::absolute(annotations_jar).string());
+    } else {
+        std::cerr << "!! Warning: JetBrains annotations jar not found at: " << annotations_jar << std::endl;
+    }
+
+    // Continue with the remaining standard R8 args setup
+    args.push_back("--output");
+    args.push_back(bin_dir_path.string());
 
     if (!no_obs) {
         std::string pg_rules_raw = config.proguard_rules;

@@ -114,6 +114,39 @@ std::pair<fs::path, fs::path> compile_source_logic(
     // 1. Clean up stale class/dex files
     cleanup_stale_assets(deleted_files, java_out, dex_cache);
 
+    // --- PHASE 0: EXTRACT KOTLIN STANDARD LIBRARY ---
+    // Extract standard library archive payload into target .class directory structure
+    if (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty()) {
+        const char* prefix_env = std::getenv("PREFIX");
+        fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
+        fs::path stdlib_jar = kotlin_lib_root / "kotlin-stdlib.jar";
+
+        if (fs::exists(stdlib_jar)) {
+            // Check if kotlin package signature files exist locally inside java_out to avoid redundant extraction loops
+            if (!fs::exists(java_out / "kotlin/Unit.class")) {
+                UI::stage("Kotlin stdlib", "Unpacking runtime classes payload into destination layout");
+                
+                // Using zip utility mapping to extract stdlib content directly into our classes cache output directory
+                std::vector<std::string> unzip_args = {
+                    "unzip", "-q", "-o", 
+                    stdlib_jar.string(), 
+                    "-d", java_out.string()
+                };
+                
+                try {
+                    run(unzip_args, "Failed to extract Kotlin standard library elements.");
+                    
+                    // Cleanup archive-specific meta files that break compilation pipelines
+                    fs::remove_all(java_out / "META-INF");
+                } catch (const std::exception& e) {
+                    UI::warn(std::string("Stdlib unpack notice: ") + e.what());
+                }
+            }
+        } else {
+            UI::error("Kotlin runtime validation failure: Standard library jar not located inside prefix location", stdlib_jar.string());
+        }
+    }
+
     // --- PHASE 1: PRE-COLLECT ALL JAVA REFERENCE STUBS ---
     // We aggregate regular Java source changes alongside generated layout references (R.java)
     // upfront so that Kotlin's AST analyzer can accurately reconcile cross-language calls.

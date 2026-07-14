@@ -86,7 +86,9 @@ void show_help() {
               << UI::CYAN << "Commands:\n" << UI::RESET
               << "  init          Initialize a new project structure from templates.\n"
               << "  build         Build the project (defaults to an incremental Debug build).\n"
-              << "  clean         Remove build artifacts (keeps keystores).\n"
+              << "  clean         Remove build artifacts.\n"
+              << "                  -d  Wipe debug compilation cache (build/debug)\n"
+              << "                  -r  Wipe release optimization cache (build/release)\n"
               << "  install <pl>  Unpack and install a signed language plugin package (.pl).\n"
               << "  uninstall <n> Remove a language plugin configuration and its footprint cache.\n"
               << "  help          Show this help menu.\n\n"
@@ -99,39 +101,41 @@ void show_help() {
               << std::endl;
 }
 
-bool clean_bin_directory() {
-    fs::path bin_path = "bin";
-
-    if (!fs::exists(bin_path)) {
-        UI::info("Directory 'bin/' does not exist. Nothing to clean.");
-        return true;
-    }
-
-    if (!fs::is_directory(bin_path)) {
-        UI::error("Target path 'bin' exists but is not a directory.");
-        return false;
-    }
-
-    UI::info(UI::Msg::CLEAN_START);
+bool clean_build_directory(bool target_release, bool target_debug) {
     size_t deleted_count = 0;
-
-    try {
-        for (const auto& entry : fs::directory_iterator(bin_path)) {
-            if (entry.is_regular_file()) {
-                std::string ext = entry.path().extension().string();
-                if (ext == ".jks" || ext == ".keystore") {
-                    continue;
-                }
-            }
-            deleted_count += fs::remove_all(entry.path());
-        }
-        UI::success(UI::Msg::CLEAN_SUCCESS + " Removed " + std::to_string(deleted_count) + " item(s).");
-        return true;
-    } 
-    catch (const fs::filesystem_error& e) {
-        UI::error("Filesystem error during directory sweep.", e.what());
-        return false;
+    
+    // If no flags are passed explicitly, clean both by default for safety
+    if (!target_release && !target_debug) {
+        target_release = true;
+        target_debug = true;
     }
+
+    auto clear_path = [&](const fs::path& target) {
+        if (fs::exists(target)) {
+            if (fs::is_directory(target)) {
+                try {
+                    deleted_count += fs::remove_all(target);
+                    UI::success("Cleaned target workspace tree segment: " + target.string());
+                } catch (const fs::filesystem_error& e) {
+                    UI::error("Filesystem sweep error targeting: " + target.string(), e.what());
+                }
+            } else {
+                UI::error("Target path mismatch (not a directory): " + target.string());
+            }
+        }
+    };
+
+    UI::info("Starting targeted operational workspace cleanup pipeline...");
+    
+    if (target_debug) {
+        clear_path(fs::absolute("build/debug"));
+    }
+    if (target_release) {
+        clear_path(fs::absolute("build/release"));
+    }
+
+    UI::success("Wipe operation finished. Removed " + std::to_string(deleted_count) + " layout item(s).");
+    return true;
 }
 
 int main(int argc, char* argv[]) {
@@ -157,7 +161,10 @@ int main(int argc, char* argv[]) {
         }
 
         if (command == "clean") {
-            bool success = clean_bin_directory();
+            bool target_release = std::find(args.begin(), args.end(), "-r") != args.end();
+            bool target_debug = std::find(args.begin(), args.end(), "-d") != args.end();
+            
+            bool success = clean_build_directory(target_release, target_debug);
             std::cerr.rdbuf(old_cerr_buf);
             return success ? 0 : 1;
         }

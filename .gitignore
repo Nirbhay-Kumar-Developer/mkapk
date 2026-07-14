@@ -1,5 +1,5 @@
 build/
-test/bin/
+test/build/
 bundle.sh
 bundle.cpp
 test/log.txt

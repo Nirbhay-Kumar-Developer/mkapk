@@ -22,18 +22,25 @@ namespace fs = std::filesystem;
 std::string perform_build(const std::vector<std::string>& raw_args, const MkapkConfig& config) {
     // 1. Setup Environment & Sanitization
     std::string proj_name = config.project_name;
-    fs::path bin_dir = fs::absolute(MkapkEnv::resolve_path(config.bin_dir));
+    
+    bool is_release = std::find(raw_args.begin(), raw_args.end(), "-release") != raw_args.end();
+    bool force_all = std::find(raw_args.begin(), raw_args.end(), "-all") != raw_args.end();
+    bool ndk_all = std::find(raw_args.begin(), raw_args.end(), "-ndk-all") != raw_args.end();
+    
+    std::string variant_dir = is_release ? "release" : "debug";
+
+    // Optimized Directories Matrix
+    fs::path bin_dir = fs::absolute("bin") / variant_dir;
+    fs::path build_dir = fs::absolute("build") / variant_dir;
+    
     fs::path src_dir = fs::absolute(MkapkEnv::resolve_path(config.src_dir));
     fs::path res_dir = fs::absolute(MkapkEnv::resolve_path(config.res_dir));
     fs::path manifest_path = fs::absolute(MkapkEnv::resolve_path(config.manifest));
     fs::path android_jar = fs::absolute(MkapkEnv::get_android_jar(config));
 
     fs::create_directories(bin_dir);
+    fs::create_directories(build_dir);
 
-    bool is_release = std::find(raw_args.begin(), raw_args.end(), "-release") != raw_args.end();
-    bool force_all = std::find(raw_args.begin(), raw_args.end(), "-all") != raw_args.end();
-    bool ndk_all = std::find(raw_args.begin(), raw_args.end(), "-ndk-all") != raw_args.end();
-    
     // --- INTERCEPT ARCHITECTURE CONTROLS PARAMETERS ---
     std::string arch_target = "";
     auto arch_it = std::find(raw_args.begin(), raw_args.end(), "-arch");
@@ -48,8 +55,8 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         smart_run(args, err_msg);
     };
 
-    // 2. UPDATED: Context-Aware Isolated Change Detection Pass
-    auto [diff, new_state] = check_changes(bin_dir, config, force_all, is_release);
+    // 2. Context-Aware Isolated Change Detection Pass (Passing build_dir path framework)
+    auto [diff, new_state] = check_changes(build_dir, config, force_all, is_release);
     if (!diff.any_changes() && !force_all) return "up-to-date";
 
     // --- SETUP ARCHITECTURE MATRIX CONFIGURATION ---
@@ -87,11 +94,11 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     auto resource_worker = std::async(std::launch::async, [&]() {
         if (resources_triggered) {
             UI::stage(UI::Msg::RES_STAGE, "Processing resource channels");
-            compile_resources(tools["aapt2"], res_dir, bin_dir, run_func, 
+            compile_resources(tools["aapt2"], res_dir, build_dir, run_func, 
                              (diff.res_changed && !force_all) ? &diff.changed_resources : nullptr);
 
-            link_manifest(tools["aapt2"], bin_dir / "unsigned.apk", android_jar, 
-                         manifest_path, bin_dir, src_dir, run_func, !is_release);
+            link_manifest(tools["aapt2"], build_dir / "unsigned.apk", android_jar, 
+                         manifest_path, build_dir, src_dir, run_func, !is_release);
         }
     });
 
@@ -102,7 +109,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
             
             compile_native(config.ndk_bin, 
                            src_dir, 
-                           bin_dir, 
+                           build_dir, 
                            compile_architectures, 
                            config.target_sdk, 
                            run_func, 
@@ -110,10 +117,9 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
                            config.native_targets);
         }
         
-        // [BUG FIX]: System libraries are placed independently of native source compilation.
-        // This ensures prebuilt libraries (libchronork.so) are restored after 'mkapk clean'.
+        // System libraries are placed independently of native source compilation.
         if (!config.system_shared_libs.empty() || !diff.changed_files["native"].empty() || force_all) {
-            auto_place_system_libraries(config, bin_dir, compile_architectures);
+            auto_place_system_libraries(config, build_dir, compile_architectures);
         }
     });
 
@@ -125,14 +131,13 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
 
     // BARRIER 1: Wait for resources. Must complete before JVM starts.
     try {
-        resource_worker.get(); 
+        resource_worker.get();
     } catch (...) {
         pipeline_err = std::current_exception();
         err_stage = "Resource pipeline failure";
     }
 
     // WORKER THREAD C: Unified JVM Source Compilation & Cascaded Dexing
-    // Only spawn this thread if the resource generation succeeded.
     std::future<void> jvm_worker;
     if (!pipeline_err) {
         jvm_worker = std::async(std::launch::async, [&]() {
@@ -140,13 +145,13 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
                 UI::stage("Source Pipeline", "Analyzing active code changes");
             }
             
-            auto [java_out, dex_cache] = compile_source_logic(config, tools, active_plugins, android_jar, bin_dir, 
+            auto [java_out, dex_cache] = compile_source_logic(config, tools, active_plugins, android_jar, build_dir, 
                                                             diff.changed_files, diff.deleted_files, 
                                                             (diff.res_changed || force_all), run_func);
 
             if (is_release) {
                 UI::stage("Minification", "Running R8 bytecode optimization");
-                run_dex_r8(tools["r8"], android_jar, config, bin_dir, run_func);
+                run_dex_r8(tools["r8"], android_jar, config, build_dir, run_func);
             } else {
                 UI::stage("Dexing", "Running D8 incremental translation");
                 std::vector<fs::path> unified_dex_targets;
@@ -159,14 +164,14 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
 
                 run_incremental_dex(tools["d8"], android_jar, src_dir, java_out, dex_cache, 
                                    unified_dex_targets, run_func);
-                run_dex_d8(tools["d8"], android_jar, bin_dir, dex_cache, run_func);
+                run_dex_d8(tools["d8"], android_jar, build_dir, dex_cache, run_func);
             }
         });
     }
 
     // BARRIER 2: Ensure Native Compiler finishes securely
     try {
-        native_worker.get();   
+        native_worker.get();
     } catch (...) {
         if (!pipeline_err) {
             pipeline_err = std::current_exception();
@@ -177,7 +182,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     // BARRIER 3: Ensure JVM Compiler finishes securely
     if (jvm_worker.valid()) {
         try {
-            jvm_worker.get();      
+            jvm_worker.get();
         } catch (...) {
             if (!pipeline_err) {
                 pipeline_err = std::current_exception();
@@ -186,8 +191,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         }
     }
 
-    // FINAL UNWIND: If any thread threw an error, surface it now after 
-    // guaranteeing all active background processes have cleanly terminated.
+    // FINAL UNWIND: Handle exceptions securely
     if (pipeline_err) {
         try {
             std::rethrow_exception(pipeline_err);
@@ -203,20 +207,29 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     // ============================================================================
     UI::info("All concurrent compilation tracks synchronization barriers cleared.");
 
-    fs::path base_unsigned_apk = bin_dir / "unsigned.apk";
+    fs::path base_unsigned_apk = build_dir / "unsigned.apk";
     
     if (!resources_triggered && !fs::exists(base_unsigned_apk)) {
         UI::warn("Base container missing. Forcing resource link pass resolution...");
-        link_manifest(tools["aapt2"], base_unsigned_apk, android_jar, manifest_path, bin_dir, src_dir, run_func, !is_release);
+        link_manifest(tools["aapt2"], base_unsigned_apk, android_jar, manifest_path, build_dir, src_dir, run_func, !is_release);
     }
 
     if (!fs::exists(base_unsigned_apk)) {
         throw std::runtime_error("Fatal Build Error: Base unsigned APK container is missing. Halting packaging loop.");
     }
 
-    std::pair<std::string, std::string> ks_info = is_release ? 
-        std::make_pair(MkapkEnv::resolve_path(config.keystore).string(),
-                       config.keystore_alias) : handle_debug_keystore();
+    // Keystores explicit subdirectory validation mapping layout routing
+    std::pair<std::string, std::string> ks_info;
+    if (is_release) {
+        fs::path resolved_ks = MkapkEnv::resolve_path(config.keystore);
+        if (fs::exists(fs::current_path() / "keystores" / resolved_ks.filename())) {
+            ks_info = {(fs::current_path() / "keystores" / resolved_ks.filename()).string(), config.keystore_alias};
+        } else {
+            ks_info = {resolved_ks.string(), config.keystore_alias};
+        }
+    } else {
+        ks_info = handle_debug_keystore();
+    }
 
     std::string profile_suffix = is_release ? ".release" : ".debug";
 
@@ -240,13 +253,24 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     for (const auto& task : package_matrix) {
         UI::stage(UI::Msg::PACK_STAGE, "Variant target: " + task.filename_suffix);
         
-        fs::path loop_unsigned = bin_dir / ("unsigned" + task.filename_suffix + ".apk");
+        fs::path loop_unsigned = build_dir / ("unsigned" + task.filename_suffix + ".apk");
         
         fs::copy_file(base_unsigned_apk, loop_unsigned, fs::copy_options::overwrite_existing);
 
-        inject_assets_and_dex(loop_unsigned, bin_dir, config.assets_dir, task.target_abis, is_release);
+        inject_assets_and_dex(loop_unsigned, build_dir, config.assets_dir, task.target_abis, is_release);
 
-        fs::path aligned_apk = align_apk(tools["zipalign"], "4", loop_unsigned, bin_dir, run_func);
+        // --- BUG FIX: INTERCEPT ANDRESGUARD RESOURCE OBFUSCATION FOR PRODUCTION RELEASE BUILDS ---
+        fs::path target_processed_apk = loop_unsigned;
+        if (is_release) {
+            fs::path resguard_jar = MkapkEnv::resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
+            fs::path config_xml = fs::current_path() / "andresguard.xml";
+            
+            if (fs::exists(resguard_jar) && fs::exists(config_xml)) {
+                target_processed_apk = obfuscate_resources(tools["resguard"], loop_unsigned, build_dir, run_func);
+            }
+        }
+
+        fs::path aligned_apk = align_apk(tools["zipalign"], "4", target_processed_apk, build_dir, run_func);
         fs::path final_apk = bin_dir / (proj_name + task.filename_suffix + ".apk");
         
         UI::stage(UI::Msg::SIGN_STAGE, final_apk.filename().string());
@@ -258,6 +282,6 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         dynamic_ret_path = final_apk.string();
     }
 
-    save_state(bin_dir, new_state, is_release);
+    save_state(build_dir, new_state, is_release);
     return ndk_all ? "Split architecture packaging structural distribution layout written within: " + bin_dir.string() : dynamic_ret_path;
 }

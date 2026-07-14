@@ -59,8 +59,8 @@ std::string get_file_hash(const fs::path& file_path) {
 /**
  * INTERNAL HELPER: Resolves the absolute path targeting the profile-specific state file.
  */
-fs::path get_profile_state_path(const fs::path& bin_dir, bool is_release) {
-    fs::path hash_dir = bin_dir / ".hashes";
+fs::path get_profile_state_path(const fs::path& build_dir, bool is_release) {
+    fs::path hash_dir = build_dir / ".hashes";
     fs::create_directories(hash_dir); // Ensure hidden directory tree exists
     
     if (is_release) {
@@ -95,13 +95,13 @@ std::map<std::string, std::map<std::string, std::string>> load_state_map(const f
  * UPDATED: Context-aware profile signature routing added via `is_release`.
  */
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
-    const fs::path& bin_dir, 
+    const fs::path& build_dir, 
     const MkapkConfig& config,
     bool force_all,
     bool is_release) // Added profile flag to govern differential resolution tracking
 {
     // Resolve the targeting profile database path cleanly
-    fs::path hash_file = get_profile_state_path(bin_dir, is_release);
+    fs::path hash_file = get_profile_state_path(build_dir, is_release);
     
     // Explicitly clamp variant profile strings to guarantee mode transitions match files
     std::string current_mode = is_release ? "release" : "debug"; 
@@ -205,8 +205,8 @@ std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
  * SECTION 4: STATE SAVING
  * UPDATED: Routes state output targets dynamically based on `is_release`.
  */
-void save_state(const fs::path& bin_dir, const std::map<std::string, std::string>& next_state, bool is_release) {
-    fs::path state_file = get_profile_state_path(bin_dir, is_release);
+void save_state(const fs::path& build_dir, const std::map<std::string, std::string>& next_state, bool is_release) {
+    fs::path state_file = get_profile_state_path(build_dir, is_release);
     
     std::ofstream f(state_file);
     if (!f.is_open()) {

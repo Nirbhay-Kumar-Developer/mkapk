@@ -123,39 +123,39 @@ void link_manifest(
 }
 
 fs::path obfuscate_resources(
-    const std::string& java_bin,
-    const fs::path& resguard_jar,
-    const fs::path& config_xml,
+    const std::string& RESGUARD_TOOL,
     const fs::path& in_apk,
-    const fs::path& bin_dir,
+    const fs::path& build_dir,
     RunFunc run_func) 
 {
-    if (!fs::exists(resguard_jar)) {
-        UI::info("AndResGuard tool signature missing inside current profile. Skipping footprint shrinking optimizations.");
-        return in_apk;
-    }
-
     UI::stage("Obfuscator", "Executing asset minification routines via AndResGuard");
 
-    fs::path resguard_out = bin_dir / "resguard_out";
+    fs::path resguard_out = build_dir / "resguard_out";
     if (fs::exists(resguard_out)) fs::remove_all(resguard_out);
 
+    fs::path config_xml = fs::current_path() / "andresguard.xml";
+
     std::vector<std::string> args = {
-        java_bin, "-jar", fs::absolute(resguard_jar).string(),
+        RESGUARD_TOOL,
         fs::absolute(in_apk).string(),
-        "-out", fs::absolute(resguard_out).string(),
-        "-config", fs::absolute(config_xml).string()
+        "-out", fs::absolute(resguard_out).string()
     };
 
-    run_func(args, "AndResGuard alignment package translation failure.");
+    if (fs::exists(config_xml)) {
+        args.push_back("-config");
+        args.push_back(fs::absolute(config_xml).string());
+    }
 
-    // Search for the optimized APK in the ResGuard output tree
-    for (const auto& entry : fs::recursive_directory_iterator(resguard_out)) {
-        if (entry.path().extension() == ".apk") {
-            return entry.path();
+    run_func(args, "AndResGuard resource obfuscation failed.");
+
+    if (fs::exists(resguard_out)) {
+        for (const auto& entry : fs::recursive_directory_iterator(resguard_out)) {
+            if (entry.path().extension() == ".apk") {
+                return entry.path();
+            }
         }
     }
 
-    UI::warn("AndResGuard process finished execution but target path container map returned empty. Reverting to base package.");
+    UI::warn("AndResGuard execution completed but no output APK was found. Reverting to base package.");
     return in_apk;
 }
