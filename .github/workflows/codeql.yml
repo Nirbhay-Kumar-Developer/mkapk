@@ -32,30 +32,14 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Check changed paths inline to prevent global job state distortion
-    - name: Categorize Modified Paths
-      id: filter
-      uses: dorny/paths-filter@v3
-      with:
-        filters: |
-          cpp:
-            - 'src/**'
-            - 'include/**'
-          java:
-            - 'java/**'
-            - 'test/**'
-
     - name: Set up Java JDK
-      if: matrix.language == 'java-kotlin' && steps.filter.outputs.java == 'true'
+      if: matrix.language == 'java-kotlin'
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
 
     - name: Initialize CodeQL
-      if: |
-        (matrix.language == 'c-cpp' && steps.filter.outputs.cpp == 'true') ||
-        (matrix.language == 'java-kotlin' && steps.filter.outputs.java == 'true')
       uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
@@ -64,7 +48,7 @@ jobs:
 
     # --- MANUAL BUILD FOR C/C++ ---
     - name: Build C/C++ Core & Modules
-      if: matrix.language == 'c-cpp' && steps.filter.outputs.cpp == 'true'
+      if: matrix.language == 'c-cpp'
       shell: bash
       run: |
         sed -i 's/\r$//' compile.sh 2>/dev/null || true
@@ -101,7 +85,7 @@ jobs:
 
     # --- MANUAL BUILD FOR JAVA/KOTLIN ---
     - name: Build Java & Kotlin Sources
-      if: matrix.language == 'java-kotlin' && steps.filter.outputs.java == 'true'
+      if: matrix.language == 'java-kotlin'
       shell: bash
       run: |
         RESGUARD_JAR=$(find . -name "AndResGuard-cli-1.2.15.jar" | head -n 1)
@@ -131,9 +115,6 @@ jobs:
         fi
 
     - name: Perform CodeQL Analysis
-      if: |
-        (matrix.language == 'c-cpp' && steps.filter.outputs.cpp == 'true') ||
-        (matrix.language == 'java-kotlin' && steps.filter.outputs.java == 'true')
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
@@ -168,10 +149,7 @@ jobs:
       uses: oxsecurity/megalinter@v7
       env:
         VALIDATE_ALL_CODEBASE: true
-
-        # Uses the core action but flags the container runner to isolate the lean documentation package
         MEGALINTER_FLAVOR: documentation
-
         ENABLE_LINTERS: BASH_SHELLCHECK,MAKEFILE_CHECKMAKE
         DISABLE_ERRORS: true
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
