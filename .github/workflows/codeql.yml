@@ -60,6 +60,7 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
+        queries: security-extended,security-and-quality
 
     # --- MANUAL BUILD FOR C/C++ ---
     - name: Build C/C++ Core & Modules
@@ -121,7 +122,7 @@ jobs:
             javac -sourcepath mock_src java/com/mkapk/tools/MkapkTools.java
           }
         fi
-        
+
         if [ -d test/src ]; then
           find test/src -name "*.java" > java_sources.txt
           if [ -s java_sources.txt ]; then
@@ -167,10 +168,10 @@ jobs:
       uses: oxsecurity/megalinter@v7
       env:
         VALIDATE_ALL_CODEBASE: true
-        
+
         # Uses the core action but flags the container runner to isolate the lean documentation package
         MEGALINTER_FLAVOR: documentation
-        
+
         ENABLE_LINTERS: BASH_SHELLCHECK,MAKEFILE_CHECKMAKE
         DISABLE_ERRORS: true
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -181,4 +182,3 @@ jobs:
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: 'megalinter-reports/megalinter-report.sarif'
-        category: "megalinter"
