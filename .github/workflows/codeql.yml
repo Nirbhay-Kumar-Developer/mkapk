@@ -61,7 +61,6 @@ jobs:
           echo "Standard build scripts failed or mismatched environment. Dropping to flat compiler fallback for CodeQL..."
           mkdir -p bin
           
-          # Up-to-date flat compilation fallback covering your deep modules
           g++ -std=c++17 \
               -Iinclude \
               src/main.cpp \
@@ -84,7 +83,6 @@ jobs:
       if: matrix.language == 'java-kotlin'
       shell: bash
       run: |
-        # Locate the CLI tool bundle in its actual path within the termux package schema
         RESGUARD_JAR=$(find . -name "AndResGuard-cli-1.2.15.jar" | head -n 1)
         CP_ARGS=""
         if [ ! -z "$RESGUARD_JAR" ]; then
@@ -124,27 +122,14 @@ jobs:
       contents: read
       statuses: write
       security-events: write
+      actions: read
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Check for Automation Changes
-      id: filter_lint
-      uses: dorny/paths-filter@v3
-      with:
-        base: 'Dependency-Resolver'
-        filters: |
-          scripts:
-            - 'compile.sh'
-            - 'bundle.sh'
-            - 'makefile'
-            - 'scripts/**'
-            - 'mkapk-aarch64/DEBIAN/postinst'
-
     - name: Run MegaLinter
-      if: steps.filter_lint.outputs.scripts == 'true'
       uses: oxsecurity/megalinter@v7
       env:
         VALIDATE_ALL_CODEBASE: true
@@ -156,7 +141,7 @@ jobs:
         DEFAULT_BRANCH: 'Dependency-Resolver'
 
     - name: Upload MegaLinter Scan Results to GitHub Security Tab
-      if: steps.filter_lint.outputs.scripts == 'true' && (success() || failure())
+      if: success() || failure()
       uses: github/codeql-action/upload-sarif@v4
       with:
-        sarif_file: 'megalinter-reports/megalinter-report.safif'
+        sarif_file: 'megalinter-reports/megalinter-report.sarif'
