@@ -1,4 +1,4 @@
-name: "CodeQL Advanced & Linting Pipeline"
+Name: "CodeQL Advanced & Linting Pipeline"
 
 on:
   push:
@@ -143,7 +143,7 @@ jobs:
             - 'Makefile'
             - 'makefile'
             - 'scripts/**'
-            
+            - 'mkapk-aarch64/DEBIAN/postinst'
 
     - name: Run MegaLinter
       if: steps.filter_lint.outputs.scripts == 'true'
