@@ -13,6 +13,11 @@
 #include "mkapk_ui.hpp"
 #include "mkapk_config.hpp"
 
+// Include the newly wired dependency resolver, extractor, and manifest merger modules
+#include "mkapk_resolver.hpp"
+#include "mkapk_extracter.hpp" 
+#include "mkapk_manifest_merger.hpp"
+
 namespace fs = std::filesystem;
 
 /**
@@ -40,6 +45,44 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
 
     fs::create_directories(bin_dir);
     fs::create_directories(build_dir);
+
+    // ============================================================================
+    // STEP 1: ON-DEVICE DEPENDENCY RESOLUTION & CACHE VALIDATION PASSTHROUGH
+    // ============================================================================
+    std::vector<std::string> all_resolved_artifacts;
+    fs::path active_manifest_path = manifest_path; 
+
+    if (!config.dependencies.empty()) {
+        UI::stage("Resolver", "Processing root dependency configuration matrix");
+
+        for (const auto& coordinate : config.dependencies) {
+            // MkapkResolver checks local storage internally before contacting remote Maven networks
+            auto resolved = MkapkResolver::resolve_dependencies(coordinate, config);
+            all_resolved_artifacts.insert(all_resolved_artifacts.end(), resolved.begin(), resolved.end());
+        }
+
+        // De-duplicate layout items safely to resolve graph collisions
+        std::sort(all_resolved_artifacts.begin(), all_resolved_artifacts.end());
+        auto last = std::unique(all_resolved_artifacts.begin(), all_resolved_artifacts.end());
+        all_resolved_artifacts.erase(last, all_resolved_artifacts.end());
+
+        // Unpack new elements automatically to $PREFIX/var/lib/mkapk/lib/ via libzip
+        MkapkExtractor::extract_all(all_resolved_artifacts);
+
+        // Merge library manifests down into the local build subdirectory workspace
+        fs::path merged_manifest_output = build_dir / "AndroidManifest.xml";
+        bool merge_success = MkapkManifestMerger::merge_manifests(
+            manifest_path.string(), 
+            merged_manifest_output.string(), 
+            all_resolved_artifacts
+        );
+
+        if (merge_success) {
+            active_manifest_path = merged_manifest_output;
+        } else {
+            UI::warn("Manifest integration anomaly caught. Falling back to primary configuration file layout.");
+        }
+    }
 
     // --- INTERCEPT ARCHITECTURE CONTROLS PARAMETERS ---
     std::string arch_target = "";
@@ -83,8 +126,8 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         compile_architectures = { host_arch };
     }
 
-    // Record flag status for resource layer skipping checks
-    bool resources_triggered = (diff.res_changed || diff.manifest_changed || force_all);
+    // Record flag status for resource layer skipping checks (Uses the updated manifest tracking context)
+    bool resources_triggered = (diff.res_changed || diff.manifest_changed || force_all || !all_resolved_artifacts.empty());
 
     // ============================================================================
     // PARALLEL TASK ORCHESTRATION LAYER (ANTI-DEADLOCK POOLING)
@@ -94,11 +137,34 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     auto resource_worker = std::async(std::launch::async, [&]() {
         if (resources_triggered) {
             UI::stage(UI::Msg::RES_STAGE, "Processing resource channels");
+            
+            // Step 1: Compile application raw resources via res.cpp
             compile_resources(tools["aapt2"], res_dir, build_dir, run_func, 
                              (diff.res_changed && !force_all) ? &diff.changed_resources : nullptr);
 
+            // Step 2: Extract AAR dependency names to fetch extracted resource maps for AAPT2 link passes
+            std::vector<std::string> aar_res_dirs;
+            const char* prefix_env = std::getenv("PREFIX");
+            fs::path prefix_path = prefix_env ? fs::path(prefix_env) : "/data/data/com.termux/files/usr";
+            
+            for (const auto& path : all_resolved_artifacts) {
+                fs::path file_path(path);
+                if (file_path.extension() == ".aar") {
+                    auto parent = file_path.parent_path();
+                    std::string version = parent.filename().string();
+                    std::string library_name = parent.parent_path().filename().string();
+                    
+                    fs::path ext_res = prefix_path / "var/lib/mkapk/lib" / library_name / version / "res";
+                    if (fs::exists(ext_res) && !fs::is_empty(ext_res)) {
+                        // Compile library raw resource trees cleanly straight into your flat cache workspace
+                        compile_resources(tools["aapt2"], ext_res, build_dir, run_func, nullptr);
+                    }
+                }
+            }
+
+            // Step 3: Package final linked layout containing the dynamically constructed manifest path configuration
             link_manifest(tools["aapt2"], build_dir / "unsigned.apk", android_jar, 
-                         manifest_path, build_dir, src_dir, run_func, !is_release);
+                         active_manifest_path, build_dir, src_dir, run_func, !is_release);
         }
     });
 
@@ -144,6 +210,42 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
             if (diff.src_changed || force_all) {
                 UI::stage("Source Pipeline", "Analyzing active code changes");
             }
+
+            // Append extracted classes.jar files down to the compilation configuration list
+            const char* prefix_env = std::getenv("PREFIX");
+            fs::path prefix_path = prefix_env ? fs::path(prefix_env) : "/data/data/com.termux/files/usr";
+            std::vector<fs::path> extra_jvm_classpaths;
+
+            for (const auto& artifact : all_resolved_artifacts) {
+                fs::path file_path(artifact);
+                if (file_path.extension() == ".aar") {
+                    auto parent = file_path.parent_path();
+                    std::string version = parent.filename().string();
+                    std::string library_name = parent.parent_path().filename().string();
+                    
+                    fs::path classes_jar = prefix_path / "var/lib/mkapk/lib" / library_name / version / "classes.jar";
+                    if (fs::exists(classes_jar)) {
+                        extra_jvm_classpaths.push_back(classes_jar);
+                    }
+                } else if (file_path.extension() == ".jar") {
+                    extra_jvm_classpaths.push_back(file_path);
+                }
+            }
+
+            // Intercept active tools mapping table and append the extra classpaths dynamically into libs/ structure
+            fs::path local_libs_dir = fs::absolute("libs");
+            fs::create_directories(local_libs_dir);
+            
+            for (const auto& jar_target : extra_jvm_classpaths) {
+                fs::path local_link = local_libs_dir / jar_target.filename();
+                if (!fs::exists(local_link)) {
+                    try {
+                        fs::create_symlink(jar_target, local_link);
+                    } catch (...) {
+                        fs::copy_file(jar_target, local_link, fs::copy_options::overwrite_existing);
+                    }
+                }
+            }
             
             auto [java_out, dex_cache] = compile_source_logic(config, tools, active_plugins, android_jar, build_dir, 
                                                             diff.changed_files, diff.deleted_files, 
@@ -162,9 +264,37 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
                     }
                 }
 
+                // Compile changed files incrementally
                 run_incremental_dex(tools["d8"], android_jar, src_dir, java_out, dex_cache, 
                                    unified_dex_targets, run_func);
+
+                // Compile unresolved class dependencies inside extra classpaths directly into the D8 caching pool
+                std::vector<fs::path> jars_to_dex;
+                for (const auto& jar : extra_jvm_classpaths) {
+                    fs::path target_cached_dex = dex_cache / jar.filename().replace_extension(".dex");
+                    if (!fs::exists(target_cached_dex) || force_all) {
+                        jars_to_dex.push_back(jar);
+                    }
+                }
+
+                if (!jars_to_dex.empty()) {
+                    std::vector<std::string> d8_library_args = {
+                        "d8",
+                        "--lib", fs::absolute(android_jar).string(),
+                        "--output", dex_cache.string()
+                    };
+                    for (const auto& j : jars_to_dex) {
+                        d8_library_args.push_back(j.string());
+                    }
+                    run_func(d8_library_args, "Failed compilation of external library classes into DEX cache slots.");
+                }
+
                 run_dex_d8(tools["d8"], android_jar, build_dir, dex_cache, run_func);
+            }
+
+            // Remove temporary class links to preserve clean state boundaries
+            for (const auto& jar_target : extra_jvm_classpaths) {
+                fs::remove(local_libs_dir / jar_target.filename());
             }
         });
     }
@@ -211,7 +341,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     
     if (!resources_triggered && !fs::exists(base_unsigned_apk)) {
         UI::warn("Base container missing. Forcing resource link pass resolution...");
-        link_manifest(tools["aapt2"], base_unsigned_apk, android_jar, manifest_path, build_dir, src_dir, run_func, !is_release);
+        link_manifest(tools["aapt2"], base_unsigned_apk, android_jar, active_manifest_path, build_dir, src_dir, run_func, !is_release);
     }
 
     if (!fs::exists(base_unsigned_apk)) {

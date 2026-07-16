@@ -105,6 +105,12 @@ namespace MkapkEnv {
                     if (lib.is_string()) config.system_shared_libs.push_back(lib.get<std::string>());
                 }
             }
+            
+           if (j.contains("DEPENDENCIES") && j["DEPENDENCIES"].is_array()) {
+               for (const auto& dep : j["DEPENDENCIES"]) {
+                   if (dep.is_string()) config.dependencies.push_back(dep.get<std::string>());
+               }
+           }
 
             if (j.contains("NATIVE_TARGETS") && j["NATIVE_TARGETS"].is_array()) {
                 for (const auto& item : j["NATIVE_TARGETS"]) {

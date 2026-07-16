@@ -4,6 +4,19 @@ import java.io.*;
 import java.util.Arrays;
 import java.security.Permission;
 
+// Requires: maven-resolver-api, maven-resolver-impl, maven-resolver-connector-basic, maven-resolver-transport-http, maven-resolver-util
+import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.RepositorySystemSession;
+import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.collection.CollectRequest;
+import org.eclipse.aether.graph.Dependency;
+import org.eclipse.aether.graph.DependencyFilter;
+import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.resolution.DependencyRequest;
+import org.eclipse.aether.resolution.DependencyResult;
+import org.eclipse.aether.util.artifact.JavaScopes;
+import org.eclipse.aether.util.filter.DependencyFilterUtils;
+
 public class MkapkTools {
 
     private static boolean isRunning = false;
@@ -29,6 +42,24 @@ public class MkapkTools {
             // Forward a structured warning over standard out for C++ UI parser ingestion
             System.out.println("[WARN]|Security Manager restricted. Ensure JVM execution args include -Djava.security.manager=allow");
         }
+    }
+
+    /**
+     * Resolves the local cache directory for Maven dependencies.
+     * Defaults to the Termux prefix if running on-device.
+     */
+    private static File getLocalCacheDir() {
+        String termuxPrefix = System.getenv("PREFIX");
+        if (termuxPrefix == null || termuxPrefix.isEmpty()) {
+            // Fallback for standard desktop Linux testing
+            termuxPrefix = System.getProperty("user.home") + "/.mkapk";
+        }
+        
+        File cacheDir = new File(termuxPrefix + "/var/lib/mkapk/lib");
+        if (!cacheDir.exists()) {
+            cacheDir.mkdirs();
+        }
+        return cacheDir;
     }
 
     public static void main(String[] args) {
@@ -135,6 +166,53 @@ public class MkapkTools {
                     System.setOut(captureStream);
                     System.setErr(captureStream);
                     com.android.apksigner.ApkSignerTool.main(args);
+                }
+                
+                case "resolve" -> {
+                    if (args.length < 1) {
+                        System.out.println("[ERROR]|Provide a maven coordinate (e.g., androidx.core:core:1.9.0)");
+                        taskFailed = true;
+                        break;
+                    }
+                    
+                    String coordinate = args[0]; // Format: groupId:artifactId:extension:version (e.g. "androidx.core:core:aar:1.9.0")
+                        
+                    // 1. Initialize the Aether Repository System (Requires boilerplate Guice/ServiceLocator setup)
+                    RepositorySystem system = Booter.newRepositorySystem();
+                    
+                    RepositorySystemSession session = Booter.newRepositorySystemSession(system, getLocalCacheDir());
+                    
+                    // 2. Define Repositories (Google Maven and Maven Central)
+                    RemoteRepository googleRepo = new RemoteRepository.Builder("google", "default", "https://maven.google.com/").build();
+                    RemoteRepository centralRepo = new RemoteRepository.Builder("central", "default", "https://repo1.maven.org/maven2/").build();
+                    
+                    // 3. Create the Dependency Request
+                    Dependency dependency = new Dependency(new DefaultArtifact(coordinate), JavaScopes.COMPILE);
+                    CollectRequest collectRequest = new CollectRequest();
+                    collectRequest.setRoot(dependency);
+                    collectRequest.addRepository(googleRepo);
+                    collectRequest.addRepository(centralRepo);
+                    
+                    // Filter out 'test' and 'provided' scopes
+                    DependencyFilter classpathFlter = DependencyFilterUtils.classpathFilter(JavaScopes.COMPILE, JavaScopes.RUNTIME);
+                    DependencyRequest dependencyRequest = new DependencyRequest(collectRequest, classpathFlter);
+                    
+                    try {
+                        // 4. Execute Resolution (This downloads files to your local cache automatically)
+                        DependencyResult dependencyResult = system.resolveDependencies(session, dependencyRequest);
+                        
+                        // 5. Pipe the results back to C++
+                        StringBuilder resolvedPaths = new StringBuilder("MKAPK_RESOLVED");
+                        for (var artifactResult : dependencyResult.getArtifactResults()) {
+                            File downloadedFile = artifactResult.getArtifact().getFile();
+                            resolvedPaths.append("|").append(downloadedFile.getAbsolutePath());
+                        }
+                        System.out.println(resolvedPaths.toString());
+                            
+                    } catch (Exception e) {
+                        System.out.println("[ERROR]|Dependency resolution failed: " + e.getMessage());
+                        taskFailed = true;
+                    }
                 }
                 case "kotlinc" -> {
                     String termuxPrefix = System.getenv("PREFIX");

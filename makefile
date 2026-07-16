@@ -17,7 +17,7 @@ OBJ_DIR = $(BUILD_DIR)/obj
 TARGET = $(BUILD_DIR)/mkapk
 
 # --- Source Discovery ---
-PROVIDER_SRCS = $(wildcard src/modules/*.cpp)
+PROVIDER_SRCS = $(wildcard src/modules/*.cpp src/modules/*.cpp)
 HELPER_SRCS = src/mkapk_env.cpp src/mkapk_helper.cpp src/mkapk_compiler.cpp
 MAIN_SRC = src/main.cpp
 

@@ -37,6 +37,9 @@ struct MkapkConfig {
     // Security
     std::string keystore;
     std::string keystore_alias;
+    
+    // Dependencies
+    std::vector<std::string> dependencies;
 
     // Validation Flag
     bool is_valid = false;
