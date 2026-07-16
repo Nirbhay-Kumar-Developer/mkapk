@@ -2,7 +2,7 @@ name: "CodeQL Advanced & Linting Pipeline"
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "Dependency-Resolver" ]
   pull_request:
     branches: [ "main" ]
   schedule:
@@ -143,6 +143,7 @@ jobs:
             - 'Makefile'
             - 'makefile'
             - 'scripts/**'
+            
 
     - name: Run MegaLinter
       if: steps.filter_lint.outputs.scripts == 'true'
