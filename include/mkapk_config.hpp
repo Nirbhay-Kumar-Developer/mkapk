@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <filesystem>
 
 // Defined here to eliminate circular include dependencies cleanly
 struct NativeTargetConfig {

@@ -6,7 +6,7 @@
 #include <zip.h>
 
 #include "mkapk_extractor.hpp"
-#include "mkapk_ui.hpp[span_1](start_span)"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
 
@@ -54,20 +54,20 @@ static bool parse_metadata_from_path(const fs::path& aar_path, std::string& libr
 bool extract_aar(const std::string& aar_path) {
     fs::path aar(aar_path);
     if (!fs::exists(aar)) {
-        UI::error("AAR file does not exist", aar_path);[span_2](start_span)[span_2](end_span)
+        UI::error("AAR file does not exist", aar_path);
         return false;
     }
 
     std::string library_name;
     std::string version;
     if (!parse_metadata_from_path(aar, library_name, version)) {
-        UI::error("Failed to parse library metadata from path", aar_path);[span_3](start_span)[span_3](end_span)
+        UI::error("Failed to parse library metadata from path", aar_path);
         return false;
     }
 
     // Target structural cache slot directory
     const char* prefix_env = std::getenv("PREFIX");
-    fs::path prefix = prefix_env ? fs::path(prefix_env) : "/data/data/com.termux/files/usr";[span_4](start_span)[span_4](end_span)
+    fs::path prefix = prefix_env ? fs::path(prefix_env) : "/data/data/com.termux/files/usr";
     fs::path dest_dir = prefix / "var/lib/mkapk/lib" / library_name / version;
 
     // Fast return if already extracted
@@ -75,13 +75,13 @@ bool extract_aar(const std::string& aar_path) {
         return true; 
     }
 
-    UI::stage("Extracting AAR", library_name + ":" + version);[span_5](start_span)[span_5](end_span)
+    UI::stage("Extracting AAR", library_name + ":" + version);
     fs::create_directories(dest_dir);
 
     int err = 0;
     zip_t* archive = zip_open(aar.string().c_str(), 0, &err);
     if (!archive) {
-        UI::error("Failed to open AAR archive: " + aar_path);[span_6](start_span)[span_6](end_span)
+        UI::error("Failed to open AAR archive: " + aar_path);
         return false;
     }
 
@@ -121,7 +121,7 @@ bool extract_aar(const std::string& aar_path) {
     zip_close(archive);
 
     if (extraction_failed) {
-        UI::error("Partial failure occurred during AAR extraction mapping for " + library_name);[span_7](start_span)[span_7](end_span)
+        UI::error("Partial failure occurred during AAR extraction mapping for " + library_name);
         fs::remove_all(dest_dir); // Prevent dirty cache state
         return false;
     }

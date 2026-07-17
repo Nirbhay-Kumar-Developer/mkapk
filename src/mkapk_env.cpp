@@ -190,47 +190,103 @@ namespace MkapkEnv {
     }
 
     std::string get_jni_classpath(const MkapkConfig& config) {
-        if (config.sdk_root.empty()) {
-             UI::warn("SDK_ROOT variable context not explicit in project layout configuration file.");
-        }
-        
-        fs::path sdk_root = resolve_path(config.sdk_root);
-        
-        fs::path coord_jar = fs::path(TERMUX_SHARE) / "mkapk/mkapk-coordinator.jar";
-        fs::path apksigner_jar = fs::path(TERMUX_SHARE) / "java/apksigner.jar";
-        
-        fs::path r8_jar = sdk_root / "cmdline-tools/latest/lib/r8.jar";
-        fs::path d8_jar = sdk_root / "cmdline-tools/latest/lib/d8-classpath.jar";
-        
-        fs::path resguard_jar = resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
-        
-        fs::path kotlin_preloader = "/data/data/com.termux/files/usr/opt/kotlin/lib/kotlin-preloader.jar";
-
-        std::vector<std::string> cp_entries;
-        
-        if (fs::exists(coord_jar)) cp_entries.push_back(coord_jar.string());
-        else UI::error("Missing tool dependency footprint registry path", coord_jar.string());
-
-        if (fs::exists(r8_jar)) cp_entries.push_back(r8_jar.string());
-        else UI::error("Missing tool dependency footprint registry path", r8_jar.string());
-        
-        if (fs::exists(apksigner_jar)) cp_entries.push_back(apksigner_jar.string());
-        else UI::error("Missing tool dependency footprint registry path", apksigner_jar.string());
-
-        if (fs::exists(d8_jar)) cp_entries.push_back(d8_jar.string());
-
-        if (fs::exists(resguard_jar)) cp_entries.push_back(resguard_jar.string());
-        
-        if (fs::exists(kotlin_preloader)) cp_entries.push_back(kotlin_preloader.string());
-        else UI::error("Kotlin Compiler installation not found at standard path");
-
-        std::string full_cp = "";
-        for (size_t i = 0; i < cp_entries.size(); ++i) {
-            full_cp += cp_entries[i] + (i == cp_entries.size() - 1 ? "" : ":");
-        }
-        
-        return full_cp;
+    if (config.sdk_root.empty()) {
+        UI::warn("SDK_ROOT variable context not explicit in project layout configuration file.");
     }
+    
+    fs::path sdk_root = resolve_path(config.sdk_root);
+    fs::path cmdline_lib = sdk_root / "cmdline-tools/latest/lib";
+    fs::path prefix_java = fs::path(TERMUX_SHARE) / "java";
+
+    std::vector<std::string> cp_entries;
+
+    // ============================================================================
+    // 1. CORE MKAPK & COMPILER UTILITIES
+    // ============================================================================
+    fs::path coord_jar = fs::path(TERMUX_SHARE) / "mkapk/mkapk-coordinator.jar";
+    fs::path apksigner_jar = prefix_java / "apksigner.jar";
+    fs::path r8_jar = cmdline_lib / "r8.jar";
+    fs::path d8_jar = cmdline_lib / "d8-classpath.jar";
+    fs::path resguard_jar = resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
+    fs::path kotlin_preloader = "/data/data/com.termux/files/usr/opt/kotlin/lib/kotlin-preloader.jar";
+
+    if (fs::exists(coord_jar)) cp_entries.push_back(coord_jar.string());
+    else UI::error("Missing tool dependency footprint registry path", coord_jar.string());
+
+    if (fs::exists(r8_jar)) cp_entries.push_back(r8_jar.string());
+    else UI::error("Missing tool dependency footprint registry path", r8_jar.string());
+    
+    if (fs::exists(apksigner_jar)) cp_entries.push_back(apksigner_jar.string());
+    else UI::error("Missing tool dependency footprint registry path", apksigner_jar.string());
+
+    if (fs::exists(d8_jar)) cp_entries.push_back(d8_jar.string());
+    if (fs::exists(resguard_jar)) cp_entries.push_back(resguard_jar.string());
+    
+    if (fs::exists(kotlin_preloader)) cp_entries.push_back(kotlin_preloader.string());
+    else UI::error("Kotlin Compiler installation not found at standard path");
+
+    // ============================================================================
+    // 2. DYNAMIC ANDROID SDK COMPONENT INJECTIONS
+    // ============================================================================
+    std::vector<fs::path> sdk_dependencies = {
+        cmdline_lib / "build-system/tools.manifest-merger.jar",
+        cmdline_lib / "zipflinger/zipflinger.jar",
+        cmdline_lib / "external/google/jimfs/jimfs/1.1/jimfs-1.1.jar",
+        cmdline_lib / "org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar",
+        cmdline_lib / "slf4j-nop-2.0.16.jar" // Checking the root flat library mapping fallback layout
+    };
+
+    for (const auto& jar_path : sdk_dependencies) {
+        if (fs::exists(jar_path)) {
+            cp_entries.push_back(jar_path.string());
+        } else if (jar_path.filename() == "slf4j-nop-2.0.16.jar") {
+            // Check alternative nested layout path strategy: external/org/slf4j/... if missing from main lib root
+            fs::path alt_nop = cmdline_lib / "org/slf4j/slf4j-nop/2.0.16/slf4j-nop-2.0.16.jar";
+            if (fs::exists(alt_nop)) cp_entries.push_back(alt_nop.string());
+        }
+    }
+
+   // 3. MINIMAL MAVEN RESOLVER & PLEXUS SHARE MATRIX ($PREFIX/share/java/)
+            std::vector<std::string> prefix_java_jars = {
+        "maven-artifact-3.9.6.jar",
+        "maven-builder-support-3.9.6.jar",
+        "maven-model-3.9.6.jar",
+        "maven-model-builder-3.9.6.jar",
+        "maven-repository-metadata-3.9.6.jar",
+        "maven-resolver-api-1.9.18.jar",
+        "maven-resolver-impl-1.9.18.jar",
+        "maven-resolver-named-locks-1.9.18.jar",
+        "maven-resolver-provider-3.9.6.jar",
+        "maven-resolver-spi-1.9.18.jar",
+        "maven-resolver-util-1.9.18.jar",
+        "maven-resolver-connector-basic-1.9.18.jar",
+        "maven-resolver-transport-http-1.9.18.jar",
+        "plexus-interpolation-1.26.jar",
+        "plexus-utils-3.5.1.jar"
+    };
+
+    for (const auto& jar_name : prefix_java_jars) {
+        fs::path target_jar = prefix_java / jar_name;
+        if (fs::exists(target_jar)) {
+            cp_entries.push_back(target_jar.string());
+        } else {
+            // Graceful fallback to locate it if user drops the cache explicitly within locally defined custom mappings
+            fs::path fallback_local = resolve_path("~/lib") / jar_name;
+            if (fs::exists(fallback_local)) {
+                cp_entries.push_back(fallback_local.string());
+            } else {
+                UI::warn("Required runtime core dependency element could not be verified: " + jar_name);
+            }
+        }
+    }
+        // 4. CLASSPATH FORMAT ASSEMBLER LOOP
+   std::string full_cp = "";
+    for (size_t i = 0; i < cp_entries.size(); ++i) {
+        full_cp += cp_entries[i] + (i == cp_entries.size() - 1 ? "" : ":");
+    }
+    
+    return full_cp;
+}
     
     std::vector<NativeTargetConfig> parse_json_native_targets(const std::string& config_content) {
         std::vector<NativeTargetConfig> targets;

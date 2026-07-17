@@ -4,7 +4,6 @@ import java.io.*;
 import java.util.Arrays;
 import java.security.Permission;
 
-// Requires: maven-resolver-api, maven-resolver-impl, maven-resolver-connector-basic, maven-resolver-transport-http, maven-resolver-util
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.RepositorySystemSession;
 import org.eclipse.aether.artifact.DefaultArtifact;
@@ -45,8 +44,8 @@ public class MkapkTools {
     }
 
     /**
-     * Resolves the local cache directory for Maven dependencies.
-     * Defaults to the Termux prefix if running on-device.
+     * Resolves the shared global cache directory for Maven dependencies[span_1](start_span)[span_1](end_span).
+     * Keeping this path global allows multiple local projects to cross-reference common dependencies[span_2](start_span)[span_2](end_span).
      */
     private static File getLocalCacheDir() {
         String termuxPrefix = System.getenv("PREFIX");
@@ -73,15 +72,14 @@ public class MkapkTools {
         // Setup the exit interceptor
         preventExit();
 
-        // Standard Input Loop (Pipe Communication with C++)
-        // BufferedReader is significantly more reliable and faster for IPC than Scanner
+        // Standard Input Loop (Pipe Communication with C++)[span_3](start_span)[span_3](end_span)
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(System.in))) {
             String input;
             
             while ((input = reader.readLine()) != null) {
                 if (input.trim().isEmpty()) continue;
 
-                // Protocol: COMMAND|ARG1|ARG2
+                // Protocol: COMMAND|ARG1|ARG2[span_4](start_span)[span_4](end_span)
                 String[] parts = input.split("\\|");
                 String command = parts[0].toUpperCase();
                 String[] toolArgs = (parts.length > 1) 
@@ -102,7 +100,7 @@ public class MkapkTools {
                         if (isRunning) {
                             boolean success = handleTask(command.toLowerCase(), toolArgs);
                             
-                            // Signal the specific outcome to the C++ orchestrator
+                            // Signal the specific outcome to the C++ orchestrator[span_5](start_span)[span_5](end_span)
                             if (success) {
                                 System.out.println("MKAPK_TASK_DONE");
                             } else {
@@ -113,11 +111,11 @@ public class MkapkTools {
                         }
                     }
                 }
-                // Crucial for IPC: Force the bytes through the pipe immediately
+                // Crucial for IPC: Force the bytes through the pipe immediately[span_6](start_span)[span_6](end_span)
                 System.out.flush();
             }
         } catch (Exception e) {
-            // Pipe likely broken or closed gracefully by the parent native process
+            // Pipe likely broken or closed gracefully by the parent native process[span_7](start_span)[span_7](end_span)
             System.err.println("[JVM STDERR] IPC Pipe disconnected: " + e.getMessage());
         }
     }
@@ -129,11 +127,11 @@ public class MkapkTools {
     private static boolean handleTask(String command, String[] args) {
         boolean taskFailed = false;
 
-        // Structured buffer to intercept underlying standard console streams
+        // Structured buffer to intercept underlying standard console streams[span_8](start_span)[span_8](end_span)
         ByteArrayOutputStream internalLogBuffer = new ByteArrayOutputStream();
         PrintStream captureStream = new PrintStream(internalLogBuffer);
 
-        // Retain normal process stream references
+        // Retain normal process stream references[span_9](start_span)[span_9](end_span)
         PrintStream originalOut = System.out;
         PrintStream originalErr = System.err;
 
@@ -167,19 +165,26 @@ public class MkapkTools {
                     System.setErr(captureStream);
                     com.android.apksigner.ApkSignerTool.main(args);
                 }
-                
+                case "manifestmerger" -> {
+                    System.setOut(captureStream);
+                    System.setErr(captureStream);
+                    // Correct CLI entry point for the SDK manifest merger jar
+                    com.android.manifmerger.Merger.main(args);
+                    
+                }
                 case "resolve" -> {
                     if (args.length < 1) {
-                        System.out.println("[ERROR]|Provide a maven coordinate (e.g., androidx.core:core:1.9.0)");
+                        System.out.println("[ERROR]|Provide a maven coordinate");
                         taskFailed = true;
                         break;
                     }
                     
-                    String coordinate = args[0]; // Format: groupId:artifactId:extension:version (e.g. "androidx.core:core:aar:1.9.0")
+                    String coordinate = args[0]; // Format: groupId:artifactId:extension:version
                         
-                    // 1. Initialize the Aether Repository System (Requires boilerplate Guice/ServiceLocator setup)
+                    // 1. Initialize the Aether Repository System (Programmatic Manual Service Locator Setup)
                     RepositorySystem system = Booter.newRepositorySystem();
                     
+                    // Forces the repository session to use the shared global artifacts storage footprint exclusively
                     RepositorySystemSession session = Booter.newRepositorySystemSession(system, getLocalCacheDir());
                     
                     // 2. Define Repositories (Google Maven and Maven Central)
@@ -198,7 +203,7 @@ public class MkapkTools {
                     DependencyRequest dependencyRequest = new DependencyRequest(collectRequest, classpathFlter);
                     
                     try {
-                        // 4. Execute Resolution (This downloads files to your local cache automatically)
+                        // 4. Execute Resolution (Downloads matching artifacts natively straight into global storage)
                         DependencyResult dependencyResult = system.resolveDependencies(session, dependencyRequest);
                         
                         // 5. Pipe the results back to C++
@@ -246,7 +251,7 @@ public class MkapkTools {
                 }
             }
         } catch (SecurityException e) {
-            // Intercepted exit from D8/R8 indicating an execution failure
+            // Intercepted exit from tools indicating an execution failure boundary
             if (e.getMessage() != null && e.getMessage().contains("Intercepted System.exit")) {
                 taskFailed = true;
             } else {
@@ -262,12 +267,12 @@ public class MkapkTools {
             t.printStackTrace(captureStream);
             taskFailed = true;
         } finally {
-            // Restore standard pipeline outputs safely to preserve daemon protocol stability
+            // Restore standard pipeline outputs safely to preserve daemon protocol stability[span_10](start_span)[span_10](end_span)
             System.setOut(originalOut);
             System.setErr(originalErr);
         }
 
-        // Process and transmit captured compiler error outputs line by line
+        // Process and transmit captured compiler error outputs line by line[span_11](start_span)[span_11](end_span)
         String rawDiagnostics = internalLogBuffer.toString();
         if (!rawDiagnostics.isEmpty()) {
             String[] diagnosticLines = rawDiagnostics.split("\\r?\\n");
@@ -275,7 +280,7 @@ public class MkapkTools {
                 String trimmedLine = diagnosticLine.trim();
                 if (trimmedLine.isEmpty()) continue;
 
-                // Squelch Jansi noise from captured compiler streams
+                // Squelch Jansi noise from captured compiler streams[span_12](start_span)[span_12](end_span)
                 if (trimmedLine.contains("jansi") || 
                     trimmedLine.contains("libjansi") || 
                     trimmedLine.contains("UnsatisfiedLinkError")) {
@@ -286,7 +291,7 @@ public class MkapkTools {
             }
         }
 
-        // Return the operational status back to the main loop
+        // Return the operational status back to the main loop[span_13](start_span)[span_13](end_span)
         return !taskFailed;
     }
 }

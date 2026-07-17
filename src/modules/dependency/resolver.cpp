@@ -34,25 +34,25 @@ std::vector<std::string> resolve_dependencies(const std::string& coordinate, con
     std::vector<std::string> resolved_paths;
 
     // 1. Resolve Classpath & Daemon Targets
-    std::string classpath = MkapkEnv::get_jni_classpath(config);[span_4][span_4]
+    std::string classpath = MkapkEnv::get_jni_classpath(config);
     
     int pipe_to_jvm[2];
     int pipe_from_jvm[2];
 
     if (pipe(pipe_to_jvm) == -1 || pipe(pipe_from_jvm) == -1) {
-        UI::error("Failed to allocate systemic tracking descriptor pipes for dependency resolution.");[span_5][span_5]
+        UI::error("Failed to allocate systemic tracking descriptor pipes for dependency resolution.");
         return resolved_paths;
     }
 
     // 2. Fork Process safely mirroring the daemon.cpp implementation context
-    pid_t pid = fork();[span_6][span_6]
+    pid_t pid = fork();
 
     if (pid == 0) { // Child Process: Target JVM Execution
-        dup2(pipe_to_jvm[0], STDIN_FILENO);[span_7][span_7]
-        dup2(pipe_from_jvm[1], STDOUT_FILENO);[span_8][span_8]
+        dup2(pipe_to_jvm[0], STDIN_FILENO);
+        dup2(pipe_from_jvm[1], STDOUT_FILENO);
 
-        close(pipe_to_jvm[1]);[span_9][span_9]
-        close(pipe_from_jvm[0]);[span_10][span_10]
+        close(pipe_to_jvm[1]);
+        close(pipe_from_jvm[0]);
 
         // Execute one-shot resolution using Java execution rules
         execlp("java", "java", 

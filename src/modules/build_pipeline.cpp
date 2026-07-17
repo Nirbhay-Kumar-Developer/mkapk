@@ -15,7 +15,7 @@
 
 // Include the newly wired dependency resolver, extractor, and manifest merger modules
 #include "mkapk_resolver.hpp"
-#include "mkapk_extracter.hpp" 
+#include "mkapk_extractor.hpp" 
 #include "mkapk_manifest_merger.hpp"
 
 namespace fs = std::filesystem;

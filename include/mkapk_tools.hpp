@@ -84,7 +84,8 @@ void compile_incremental_java(
     const fs::path& android_jar,
     const fs::path& out_dir,
     const std::vector<fs::path>& changed_files,
-    RunFunc run_func
+    RunFunc run_func,
+    const std::vector<fs::path>& extra_dependency_jars = {}
 );
 
 // Kotlin Module
@@ -118,7 +119,8 @@ void compile_resources(
     const fs::path& res_dir,
     const fs::path& bin_dir,
     RunFunc run_func,
-    const std::vector<fs::path>* changed_res_files = nullptr
+    const std::vector<fs::path>* changed_res_files = nullptr,
+    const std::vector<fs::path>& exta_dependency_res_dirs = {}
 );
 
 void link_manifest(
