@@ -228,12 +228,13 @@ namespace MkapkEnv {
     // ============================================================================
     // 2. DYNAMIC ANDROID SDK COMPONENT INJECTIONS
     // ============================================================================
-    std::vector<fs::path> sdk_dependencies = {
-        cmdline_lib / "build-system/tools.manifest-merger.jar",
-        cmdline_lib / "zipflinger/zipflinger.jar",
-        cmdline_lib / "external/google/jimfs/jimfs/1.1/jimfs-1.1.jar",
-        cmdline_lib / "org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar",
-        cmdline_lib / "slf4j-nop-2.0.16.jar" // Checking the root flat library mapping fallback layout
+        std::vector<fs::path> sdk_dependencies = {
+            cmdline_lib / "build-system/tools.manifest-merger.jar",
+            cmdline_lib / "zipflinger/zipflinger.jar",
+            cmdline_lib / "external/google/jimfs/jimfs/1.1/jimfs-1.1.jar",
+            cmdline_lib / "org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar",
+            cmdline_lib / "common.jar",
+            cmdline_lib / "slf4j-nop-2.0.16.jar"
     };
 
     for (const auto& jar_path : sdk_dependencies) {

@@ -195,7 +195,8 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     std::exception_ptr pipeline_err = nullptr;
     std::string err_stage;
 
-    // BARRIER 1: Wait for resources. Must complete before JVM starts.
+    // BARRIER 1: Wait for resources[span_1](start_span)[span_1](end_span). Move directly above JVM worker initialization to 
+    // guarantee R.java code generation maps are completely flushed to disk[span_2](start_span)[span_2](end_span).
     try {
         resource_worker.get();
     } catch (...) {

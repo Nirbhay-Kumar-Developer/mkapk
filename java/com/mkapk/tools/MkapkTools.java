@@ -1,7 +1,12 @@
 package com.mkapk.tools;
 
 import java.io.*;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.Arrays;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.Collections;
 import java.security.Permission;
 
 import org.eclipse.aether.RepositorySystem;
@@ -19,6 +24,9 @@ import org.eclipse.aether.util.filter.DependencyFilterUtils;
 public class MkapkTools {
 
     private static boolean isRunning = false;
+    
+    // Persistent pool tracking dynamically downloaded dependencies across separate IPC build loops
+    private static final Set<URL> dynamicClassPathUrls = Collections.synchronizedSet(new LinkedHashSet<>());
 
     /**
      * Prevents tools like D8/R8 from killing the JVM process.
@@ -44,8 +52,8 @@ public class MkapkTools {
     }
 
     /**
-     * Resolves the shared global cache directory for Maven dependencies[span_1](start_span)[span_1](end_span).
-     * Keeping this path global allows multiple local projects to cross-reference common dependencies[span_2](start_span)[span_2](end_span).
+     * Resolves the shared global cache directory for Maven dependencies.
+     * Keeping this path global allows multiple local projects to cross-reference common dependencies.
      */
     private static File getLocalCacheDir() {
         String termuxPrefix = System.getenv("PREFIX");
@@ -72,14 +80,14 @@ public class MkapkTools {
         // Setup the exit interceptor
         preventExit();
 
-        // Standard Input Loop (Pipe Communication with C++)[span_3](start_span)[span_3](end_span)
+        // Standard Input Loop (Pipe Communication with C++)
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(System.in))) {
             String input;
             
             while ((input = reader.readLine()) != null) {
                 if (input.trim().isEmpty()) continue;
 
-                // Protocol: COMMAND|ARG1|ARG2[span_4](start_span)[span_4](end_span)
+                // Protocol: COMMAND|ARG1|ARG2
                 String[] parts = input.split("\\|");
                 String command = parts[0].toUpperCase();
                 String[] toolArgs = (parts.length > 1) 
@@ -100,7 +108,7 @@ public class MkapkTools {
                         if (isRunning) {
                             boolean success = handleTask(command.toLowerCase(), toolArgs);
                             
-                            // Signal the specific outcome to the C++ orchestrator[span_5](start_span)[span_5](end_span)
+                            // Signal the specific outcome to the C++ orchestrator
                             if (success) {
                                 System.out.println("MKAPK_TASK_DONE");
                             } else {
@@ -111,11 +119,11 @@ public class MkapkTools {
                         }
                     }
                 }
-                // Crucial for IPC: Force the bytes through the pipe immediately[span_6](start_span)[span_6](end_span)
+                // Crucial for IPC: Force the bytes through the pipe immediately
                 System.out.flush();
             }
         } catch (Exception e) {
-            // Pipe likely broken or closed gracefully by the parent native process[span_7](start_span)[span_7](end_span)
+            // Pipe likely broken or closed gracefully by the parent native process
             System.err.println("[JVM STDERR] IPC Pipe disconnected: " + e.getMessage());
         }
     }
@@ -127,11 +135,11 @@ public class MkapkTools {
     private static boolean handleTask(String command, String[] args) {
         boolean taskFailed = false;
 
-        // Structured buffer to intercept underlying standard console streams[span_8](start_span)[span_8](end_span)
+        // Structured buffer to intercept underlying standard console streams
         ByteArrayOutputStream internalLogBuffer = new ByteArrayOutputStream();
         PrintStream captureStream = new PrintStream(internalLogBuffer);
 
-        // Retain normal process stream references[span_9](start_span)[span_9](end_span)
+        // Retain normal process stream references
         PrintStream originalOut = System.out;
         PrintStream originalErr = System.err;
 
@@ -139,10 +147,22 @@ public class MkapkTools {
             switch (command) {
                 case "javac" -> {
                     PrintWriter logWriter = new PrintWriter(captureStream);
-                    int result = com.sun.tools.javac.Main.compile(args, logWriter);
-                    logWriter.flush();
-                    if (result != 0) {
-                        taskFailed = true;
+                    
+                    // Create child context isolating runtime dependencies properly
+                    try (URLClassLoader contextLoader = new URLClassLoader(
+                            dynamicClassPathUrls.toArray(new URL[0]), 
+                            MkapkTools.class.getClassLoader())) {
+                        
+                        // Bridge context classloader safely onto the active thread map
+                        Thread.currentThread().setContextClassLoader(contextLoader);
+                        
+                        int result = com.sun.tools.javac.Main.compile(args, logWriter);
+                        logWriter.flush();
+                        if (result != 0) {
+                            taskFailed = true;
+                        }
+                    } finally {
+                        Thread.currentThread().setContextClassLoader(MkapkTools.class.getClassLoader());
                     }
                 }
                 case "d8" -> {
@@ -170,7 +190,6 @@ public class MkapkTools {
                     System.setErr(captureStream);
                     // Correct CLI entry point for the SDK manifest merger jar
                     com.android.manifmerger.Merger.main(args);
-                    
                 }
                 case "resolve" -> {
                     if (args.length < 1) {
@@ -206,11 +225,16 @@ public class MkapkTools {
                         // 4. Execute Resolution (Downloads matching artifacts natively straight into global storage)
                         DependencyResult dependencyResult = system.resolveDependencies(session, dependencyRequest);
                         
-                        // 5. Pipe the results back to C++
+                        // 5. Pipe the results back to C++ and append download locations directly into live caches
                         StringBuilder resolvedPaths = new StringBuilder("MKAPK_RESOLVED");
                         for (var artifactResult : dependencyResult.getArtifactResults()) {
                             File downloadedFile = artifactResult.getArtifact().getFile();
                             resolvedPaths.append("|").append(downloadedFile.getAbsolutePath());
+                            
+                            // Mutate live system context seamlessly via URL transformation
+                            if (downloadedFile.exists()) {
+                                dynamicClassPathUrls.add(downloadedFile.toURI().toURL());
+                            }
                         }
                         System.out.println(resolvedPaths.toString());
                             
@@ -238,11 +262,17 @@ public class MkapkTools {
                     System.setOut(captureStream);
                     System.setErr(captureStream);
                     
-                    try {
+                    // Create isolated context class loader execution bounds for Kotlinc
+                    try (URLClassLoader contextLoader = new URLClassLoader(
+                            dynamicClassPathUrls.toArray(new URL[0]), 
+                            MkapkTools.class.getClassLoader())) {
+                        
+                        Thread.currentThread().setContextClassLoader(contextLoader);
                         org.jetbrains.kotlin.preloading.Preloader.main(preloaderArgs);
                     } finally {
                         System.setOut(originalOut);
                         System.setErr(originalErr);
+                        Thread.currentThread().setContextClassLoader(MkapkTools.class.getClassLoader());
                     }
                 }
                 default -> {
@@ -267,12 +297,12 @@ public class MkapkTools {
             t.printStackTrace(captureStream);
             taskFailed = true;
         } finally {
-            // Restore standard pipeline outputs safely to preserve daemon protocol stability[span_10](start_span)[span_10](end_span)
+            // Restore standard pipeline outputs safely to preserve daemon protocol stability
             System.setOut(originalOut);
             System.setErr(originalErr);
         }
 
-        // Process and transmit captured compiler error outputs line by line[span_11](start_span)[span_11](end_span)
+        // Process and transmit captured compiler error outputs line by line
         String rawDiagnostics = internalLogBuffer.toString();
         if (!rawDiagnostics.isEmpty()) {
             String[] diagnosticLines = rawDiagnostics.split("\\r?\\n");
@@ -280,7 +310,7 @@ public class MkapkTools {
                 String trimmedLine = diagnosticLine.trim();
                 if (trimmedLine.isEmpty()) continue;
 
-                // Squelch Jansi noise from captured compiler streams[span_12](start_span)[span_12](end_span)
+                // Squelch Jansi noise from captured compiler streams
                 if (trimmedLine.contains("jansi") || 
                     trimmedLine.contains("libjansi") || 
                     trimmedLine.contains("UnsatisfiedLinkError")) {
@@ -291,7 +321,7 @@ public class MkapkTools {
             }
         }
 
-        // Return the operational status back to the main loop[span_13](start_span)[span_13](end_span)
+        // Return the operational status back to the main loop
         return !taskFailed;
     }
 }

@@ -22,17 +22,17 @@ import java.util.Collection;
 
 public class Booter {
 
-    /**
-     * Minimalist, programmatic Service Locator wrapper that cuts out Guice/Sisu lifecycle scans[span_1](start_span)[span_1](end_span).
+        /**
+     * Minimalist, programmatic Service Locator wrapper that cuts out Guice/Sisu lifecycle scans.
      */
     public static RepositorySystem newRepositorySystem() {
         DefaultServiceLocator locator = MavenRepositorySystemUtils.newServiceLocator();
         
-        // 1. Explicit Programmatic Bindings (Zero-Reflection Path)[span_2](start_span)[span_2](end_span)
+        // 1. Explicit Programmatic Bindings (Zero-Reflection Path)
         locator.addService(RepositoryConnectorFactory.class, BasicRepositoryConnectorFactory.class);
         locator.addService(TransporterFactory.class, HttpTransporterFactory.class);
 
-        // 2. Inject NoopSyncContextFactory to strip out multi-process concurrent database file-locking delays[span_3](start_span)[span_3](end_span)
+        // 2. Pass the Class blueprint instead of an initialized instance
         locator.setService(SyncContextFactory.class, NoopSyncContextFactory.class);
 
         locator.setErrorHandler(new DefaultServiceLocator.ErrorHandler() {
@@ -46,7 +46,7 @@ public class Booter {
     }
 
     /**
-     * Initializes a lightweight repo session mapped directly to local storage targets[span_4](start_span)[span_4](end_span).
+     * Initializes a lightweight repo session mapped directly to local storage targets[span_7](start_span)[span_7](end_span).
      */
     public static RepositorySystemSession newRepositorySystemSession(RepositorySystem system, File localRepoDir) {
         DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
@@ -54,7 +54,7 @@ public class Booter {
         LocalRepository localRepo = new LocalRepository(localRepoDir);
         session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
 
-        // Disable remote tracking listeners to keep stdout clean for the C++ IPC layer[span_5](start_span)[span_5](end_span)
+        // Disable remote tracking listeners to keep stdout clean for the C++ IPC layer[span_8](start_span)[span_8](end_span)
         session.setTransferListener(null);
         session.setRepositoryListener(null);
 
@@ -65,8 +65,8 @@ public class Booter {
      * ============================================================================
      * PRIVATE NESTED CLASS: NoopSyncContextFactory
      * ============================================================================
-     * Evicts standard multi-threading/multi-process locking mechanisms[span_6](start_span)[span_6](end_span). 
-     * Signature matches the exact Type Erasure expected by Aether SPI.
+     * Evicts standard multi-threading/multi-process locking mechanisms[span_9](start_span)[span_9](end_span). 
+     * Signature matches the exact Type Erasure expected by Aether SPI[span_10](start_span)[span_10](end_span).
      */
     private static class NoopSyncContextFactory implements SyncContextFactory {
         @Override
@@ -75,12 +75,12 @@ public class Booter {
                 @Override
                 public void acquire(Collection<? extends Artifact> artifacts,
                                     Collection<? extends Metadata> metadatas) {
-                    // Fast path: No locking overhead on flash storage[span_7](start_span)[span_7](end_span)
+                    // Fast path: No locking overhead on flash storage[span_11](start_span)[span_11](end_span)
                 }
 
                 @Override
                 public void close() {
-                    // Intentional no-op stub[span_8](start_span)[span_8](end_span)
+                    // Intentional no-op stub[span_12](start_span)[span_12](end_span)
                 }
             };
         }
