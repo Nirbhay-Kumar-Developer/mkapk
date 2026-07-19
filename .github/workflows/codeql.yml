@@ -33,7 +33,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Check changed paths inline to prevent global job state distortion
+      # Isolates matrix scope to modified scopes safely
       - name: Categorize Modified Paths
         id: filter
         uses: dorny/paths-filter@v3
@@ -60,11 +60,12 @@ jobs:
           (matrix.language == 'c-cpp' &&
           steps.filter.outputs.cpp == 'true') ||
           (matrix.language == 'java-kotlin' &&
-          steps.filter.outputs.java == 'true')
+          steps.filter.outputs.java == 'true' )
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          queries: security-extended,security-and-quality
 
       # --- MANUAL BUILD FOR C/C++ ---
       - name: Build C/C++ Core & Modules
@@ -167,6 +168,7 @@ jobs:
             fi
           fi
 
+      # Fixed: Guard applied here prevents uninitialized execution
       - name: Perform CodeQL Analysis
         if: >-
           (matrix.language == 'c-cpp' &&
