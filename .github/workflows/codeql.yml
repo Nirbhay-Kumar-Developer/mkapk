@@ -1,10 +1,11 @@
+---
 name: "CodeQL Advanced & Linting Pipeline"
 
-on:
+"on":
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   schedule:
     - cron: '18 21 * * 2'
 
@@ -29,113 +30,147 @@ jobs:
             build-mode: manual
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # Check changed paths inline to prevent global job state distortion
-    - name: Categorize Modified Paths
-      id: filter
-      uses: dorny/paths-filter@v3
-      with:
-        filters: |
-          cpp:
-            - 'src/**'
-            - 'include/**'
-          java:
-            - 'java/**'
-            - 'test/**'
+      # Check changed paths inline to prevent global job state distortion
+      - name: Categorize Modified Paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cpp:
+              - 'src/**'
+              - 'include/**'
+            java:
+              - 'java/**'
+              - 'test/**'
 
-    - name: Set up Java JDK
-      if: matrix.language == 'java-kotlin' && steps.filter.outputs.java == 'true'
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'zulu'
-        java-version: '17'
+      - name: Set up Java JDK
+        if: >-
+          matrix.language == 'java-kotlin' &&
+          steps.filter.outputs.java == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
 
-    - name: Initialize CodeQL
-      if: |
-        (matrix.language == 'c-cpp' && steps.filter.outputs.cpp == 'true') ||
-        (matrix.language == 'java-kotlin' && steps.filter.outputs.java == 'true')
-      uses: github/codeql-action/init@v4
-      with:
-        languages: ${{ matrix.language }}
-        build-mode: ${{ matrix.build-mode }}
+      - name: Initialize CodeQL
+        if: >-
+          (matrix.language == 'c-cpp' &&
+          steps.filter.outputs.cpp == 'true') ||
+          (matrix.language == 'java-kotlin' &&
+          steps.filter.outputs.java == 'true')
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
 
-    # --- MANUAL BUILD FOR C/C++ ---
-    - name: Build C/C++ Core & Modules
-      if: matrix.language == 'c-cpp' && steps.filter.outputs.cpp == 'true'
-      shell: bash
-      run: |
-        sed -i 's/\r$//' compile.sh 2>/dev/null || true
-        echo "Attempting build via repository scripts..."
-        if [ -f ./compile.sh ] && bash compile.sh; then
-          echo "Build via compile.sh succeeded."
-        elif [ -f Makefile ] || [ -f makefile ] && make; then
-          echo "Build via Makefile succeeded."
-        else
-          echo "Standard build scripts failed or mismatched environment. Dropping to flat compiler fallback for CodeQL..."
-          mkdir -p bin
-          g++ -std=c++17 \
-              -Iinclude \
-              src/main.cpp \
-              src/mkapk_compiler.cpp \
-              src/mkapk_env.cpp \
-              src/mkapk_helper.cpp \
-              src/modules/build_pipeline.cpp \
-              src/modules/change_checker.cpp \
-              src/modules/daemon.cpp \
-              src/modules/dex.cpp \
-              src/modules/finish.cpp \
-              src/modules/java.cpp \
-              src/modules/kotlin.cpp \
-              src/modules/native.cpp \
-              src/modules/plugin_manager.cpp \
-              src/modules/res.cpp \
-              -o mkapk_bin || {
-                echo "Warning: Direct compilation returned errors due to missing third-party native headers."
-                echo "Compiling structural interfaces only to ensure CodeQL extraction covers the architecture..."
-                g++ -std=c++17 -c -Iinclude src/*.cpp src/modules/*.cpp || true
-              }
-        fi
-
-    # --- MANUAL BUILD FOR JAVA/KOTLIN ---
-    - name: Build Java & Kotlin Sources
-      if: matrix.language == 'java-kotlin' && steps.filter.outputs.java == 'true'
-      shell: bash
-      run: |
-        RESGUARD_JAR=$(find . -name "AndResGuard-cli-1.2.15.jar" | head -n 1)
-        CP_ARGS=""
-        if [ ! -z "$RESGUARD_JAR" ]; then
-          CP_ARGS="-cp $RESGUARD_JAR"
-        fi
-
-        if [ -f java/com/mkapk/tools/MkapkTools.java ]; then
-          javac $CP_ARGS java/com/mkapk/tools/MkapkTools.java || {
-            echo "Direct compilation failed due to missing Android SDK dependencies. Creating structural stubs for CodeQL tracing..."
-            mkdir -p mock_src/com/android/tools/r8 mock_src/com/tencent/mm/resourceproguard/cli mock_src/com/android/apksigner mock_src/org/jetbrains/kotlin/preloading
-            echo "package com.android.tools.r8; public class D8 { public static void main(String[] a){} }" > mock_src/com/android/tools/r8/D8.java
-            echo "package com.android.tools.r8; public class R8 { public static void main(String[] a){} }" > mock_src/com/android/tools/r8/R8.java
-            echo "package com.tencent.mm.resourceproguard.cli; public class CliMain { public static void main(String[] a){} }" > mock_src/com/tencent/mm/resourceproguard/cli/CliMain.java
-            echo "package com.android.apksigner; public class ApkSignerTool { public static void main(String[] a){} }" > mock_src/com/android/apksigner/ApkSignerTool.java
-            echo "package org.jetbrains.kotlin.preloading; public class Preloader { public static void main(String[] a){} }" > mock_src/org/jetbrains/kotlin/preloading/Preloader.java
-            javac -sourcepath mock_src java/com/mkapk/tools/MkapkTools.java
-          }
-        fi
-        
-        if [ -d test/src ]; then
-          find test/src -name "*.java" > java_sources.txt
-          if [ -s java_sources.txt ]; then
-            javac -allow-empty @java_sources.txt || true
+      # --- MANUAL BUILD FOR C/C++ ---
+      - name: Build C/C++ Core & Modules
+        if: matrix.language == 'c-cpp' && steps.filter.outputs.cpp == 'true'
+        shell: bash
+        run: |
+          sed -i 's/\r$//' compile.sh 2>/dev/null || true
+          echo "Attempting build via repository scripts..."
+          if [ -f ./compile.sh ] && bash compile.sh; then
+            echo "Build via compile.sh succeeded."
+          elif [ -f Makefile ] || [ -f makefile ] && make; then
+            echo "Build via Makefile succeeded."
+          else
+            echo "Standard build scripts failed or mismatched environment."
+            echo "Dropping to flat compiler fallback for CodeQL..."
+            mkdir -p bin
+            g++ -std=c++17 \
+                -Iinclude \
+                src/main.cpp \
+                src/mkapk_compiler.cpp \
+                src/mkapk_env.cpp \
+                src/mkapk_helper.cpp \
+                src/modules/build_pipeline.cpp \
+                src/modules/change_checker.cpp \
+                src/modules/daemon.cpp \
+                src/modules/dex.cpp \
+                src/modules/finish.cpp \
+                src/modules/java.cpp \
+                src/modules/kotlin.cpp \
+                src/modules/native.cpp \
+                src/modules/plugin_manager.cpp \
+                src/modules/res.cpp \
+                -o mkapk_bin || {
+                  echo "Warning: Native header missing."
+                  echo "Compiling interfaces for CodeQL extraction..."
+                  g++ -std=c++17 -c -Iinclude \
+                      src/*.cpp src/modules/*.cpp || true
+                }
           fi
-        fi
 
-    - name: Perform CodeQL Analysis
-      if: |
-        (matrix.language == 'c-cpp' && steps.filter.outputs.cpp == 'true') ||
-        (matrix.language == 'java-kotlin' && steps.filter.outputs.java == 'true')
-      uses: github/codeql-action/analyze@v4
-      with:
-        category: "/language:${{matrix.language}}"
+      # --- MANUAL BUILD FOR JAVA/KOTLIN ---
+      - name: Build Java & Kotlin Sources
+        if: >-
+          matrix.language == 'java-kotlin' &&
+          steps.filter.outputs.java == 'true'
+        shell: bash
+        run: |
+          RESGUARD_JAR=$(find . -name "AndResGuard-cli-1.2.15.jar" | head -n 1)
+          CP_ARGS=""
+          if [ ! -z "$RESGUARD_JAR" ]; then
+            CP_ARGS="-cp $RESGUARD_JAR"
+          fi
+
+          if [ -f java/com/mkapk/tools/MkapkTools.java ]; then
+            javac $CP_ARGS java/com/mkapk/tools/MkapkTools.java || {
+              echo "Direct compilation failed due to missing dependencies."
+              echo "Creating structural stubs for CodeQL tracing..."
+              mkdir -p mock_src/com/android/tools/r8 \
+                       mock_src/com/tencent/mm/resourceproguard/cli \
+                       mock_src/com/android/apksigner \
+                       mock_src/org/jetbrains/kotlin/preloading
+
+              # Split long structural stub generations safely
+              echo "package com.android.tools.r8;"\
+                   "public class D8 { public static void main(String[] a){} }"\
+                   > mock_src/com/android/tools/r8/D8.java
+
+              echo "package com.android.tools.r8;"\
+                   "public class R8 { public static void main(String[] a){} }"\
+                   > mock_src/com/android/tools/r8/R8.java
+
+              echo "package com.tencent.mm.resourceproguard.cli;"\
+                   "public class CliMain {"\
+                   "public static void main(String[] a){} }"\
+                   > mock_src/com/tencent/mm/resourceproguard/cli/CliMain.java
+
+              echo "package com.android.apksigner;"\
+                   "public class ApkSignerTool {"\
+                   "public static void main(String[] a){} }"\
+                   > mock_src/com/android/apksigner/ApkSignerTool.java
+
+              echo "package org.jetbrains.kotlin.preloading;"\
+                   "public class Preloader {"\
+                   "public static void main(String[] a){} }"\
+                   > mock_src/org/jetbrains/kotlin/preloading/Preloader.java
+
+              javac -sourcepath mock_src java/com/mkapk/tools/MkapkTools.java
+            }
+          fi
+
+          if [ -d test/src ]; then
+            find test/src -name "*.java" > java_sources.txt
+            if [ -s java_sources.txt ]; then
+              javac -allow-empty @java_sources.txt || true
+            fi
+          fi
+
+      - name: Perform CodeQL Analysis
+        if: >-
+          (matrix.language == 'c-cpp' &&
+          steps.filter.outputs.cpp == 'true') ||
+          (matrix.language == 'java-kotlin' &&
+          steps.filter.outputs.java == 'true')
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{matrix.language}}"
 
   # --- AUTOMATED BUILD SCRIPT AND MAKEFILE LINTING ---
   lint:
@@ -146,39 +181,37 @@ jobs:
       statuses: write
       security-events: write
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Check for Automation Changes
-      id: filter_lint
-      uses: dorny/paths-filter@v3
-      with:
-        filters: |
-          scripts:
-            - 'compile.sh'
-            - 'Makefile'
-            - 'makefile'
-            - 'scripts/**'
+      - name: Check for Automation Changes
+        id: filter_lint
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            scripts:
+              - 'compile.sh'
+              - 'Makefile'
+              - 'makefile'
+              - 'scripts/**'
 
-    - name: Run MegaLinter
-      if: steps.filter_lint.outputs.scripts == 'true'
-      uses: oxsecurity/megalinter@v7
-      env:
-        VALIDATE_ALL_CODEBASE: true
-        
-        # Uses the core action but flags the container runner to isolate the lean documentation package
-        MEGALINTER_FLAVOR: documentation
-        
-        ENABLE_LINTERS: BASH_SHELLCHECK,MAKEFILE_CHECKMAKE
-        DISABLE_ERRORS: true
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SARIF_REPORTER: true
+      - name: Run MegaLinter
+        if: steps.filter_lint.outputs.scripts == 'true'
+        uses: oxsecurity/megalinter@v7
+        env:
+          VALIDATE_ALL_CODEBASE: true
+          MEGALINTER_FLAVOR: documentation
+          ENABLE_LINTERS: BASH_SHELLCHECK,MAKEFILE_CHECKMAKE
+          DISABLE_ERRORS: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SARIF_REPORTER: true
 
-    - name: Upload MegaLinter Scan Results to GitHub Security Tab
-      if: steps.filter_lint.outputs.scripts == 'true' && (success() || failure())
-      uses: github/codeql-action/upload-sarif@v4
-      with:
-        sarif_file: 'megalinter-reports/megalinter-report.sarif'
-        category: "megalinter"
+      - name: Upload MegaLinter Scan Results to GitHub Security Tab
+        if: >-
+          steps.filter_lint.outputs.scripts == 'true' &&
+          (success() || failure())
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'megalinter-reports/megalinter-report.sarif'
