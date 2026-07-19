@@ -33,34 +33,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Isolates matrix scope to modified scopes safely
-      - name: Categorize Modified Paths
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            cpp:
-              - 'src/**'
-              - 'include/**'
-            java:
-              - 'java/**'
-              - 'test/**'
-
       - name: Set up Java JDK
-        if: >-
-          matrix.language == 'java-kotlin' &&
-          steps.filter.outputs.java == 'true'
+        if: matrix.language == 'java-kotlin'
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
+      # Integrated: Running advanced security and quality suites
       - name: Initialize CodeQL
-        if: >-
-          (matrix.language == 'c-cpp' &&
-          steps.filter.outputs.cpp == 'true') ||
-          (matrix.language == 'java-kotlin' &&
-          steps.filter.outputs.java == 'true' )
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
@@ -69,7 +50,7 @@ jobs:
 
       # --- MANUAL BUILD FOR C/C++ ---
       - name: Build C/C++ Core & Modules
-        if: matrix.language == 'c-cpp' && steps.filter.outputs.cpp == 'true'
+        if: matrix.language == 'c-cpp'
         shell: bash
         run: |
           sed -i 's/\r$//' compile.sh 2>/dev/null || true
@@ -108,9 +89,7 @@ jobs:
 
       # --- MANUAL BUILD FOR JAVA/KOTLIN ---
       - name: Build Java & Kotlin Sources
-        if: >-
-          matrix.language == 'java-kotlin' &&
-          steps.filter.outputs.java == 'true'
+        if: matrix.language == 'java-kotlin'
         shell: bash
         run: |
           RESGUARD_JAR=$(find . -name "AndResGuard-cli-1.2.15.jar" \
@@ -129,33 +108,29 @@ jobs:
                        mock_src/com/android/apksigner \
                        mock_src/org/jetbrains/kotlin/preloading
 
-              SRC_D8="mock_src/com/android/tools/r8/D8.java"
+              # Safely split strings to keep lines under 80 chars
               echo "package com.android.tools.r8;"\
               "public class D8 { public static void main(String[] a){} }"\
-              > "$SRC_D8"
+              > mock_src/com/android/tools/r8/D8.java
 
-              SRC_R8="mock_src/com/android/tools/r8/R8.java"
               echo "package com.android.tools.r8;"\
               "public class R8 { public static void main(String[] a){} }"\
-              > "$SRC_R8"
+              > mock_src/com/android/tools/r8/R8.java
 
-              SRC_CLI="mock_src/com/tencent/mm/resourceproguard/cli/CliMain.java"
               echo "package com.tencent.mm.resourceproguard.cli;"\
               "public class CliMain {"\
               "public static void main(String[] a){} }"\
-              > "$SRC_CLI"
+              > mock_src/com/tencent/mm/resourceproguard/cli/CliMain.java
 
-              SRC_SIGN="mock_src/com/android/apksigner/ApkSignerTool.java"
               echo "package com.android.apksigner;"\
               "public class ApkSignerTool {"\
               "public static void main(String[] a){} }"\
-              > "$SRC_SIGN"
+              > mock_src/com/android/apksigner/ApkSignerTool.java
 
-              SRC_PRE="mock_src/org/jetbrains/kotlin/preloading/Preloader.java"
               echo "package org.jetbrains.kotlin.preloading;"\
               "public class Preloader {"\
               "public static void main(String[] a){} }"\
-              > "$SRC_PRE"
+              > mock_src/org/jetbrains/kotlin/preloading/Preloader.java
 
               javac -sourcepath mock_src java/com/mkapk/tools/MkapkTools.java
             }
@@ -168,13 +143,7 @@ jobs:
             fi
           fi
 
-      # Fixed: Guard applied here prevents uninitialized execution
       - name: Perform CodeQL Analysis
-        if: >-
-          (matrix.language == 'c-cpp' &&
-          steps.filter.outputs.cpp == 'true') ||
-          (matrix.language == 'java-kotlin' &&
-          steps.filter.outputs.java == 'true')
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{matrix.language}}"
@@ -193,19 +162,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check for Automation Changes
-        id: filter_lint
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            scripts:
-              - 'compile.sh'
-              - 'Makefile'
-              - 'makefile'
-              - 'scripts/**'
-
+      # MegaLinter now triggers globally every execution path
       - name: Run MegaLinter
-        if: steps.filter_lint.outputs.scripts == 'true'
         uses: oxsecurity/megalinter@v7
         env:
           VALIDATE_ALL_CODEBASE: true
@@ -216,9 +174,7 @@ jobs:
           SARIF_REPORTER: true
 
       - name: Upload MegaLinter Scan Results to GitHub Security Tab
-        if: >-
-          steps.filter_lint.outputs.scripts == 'true' &&
-          (success() || failure())
+        if: success() || failure()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'megalinter-reports/megalinter-report.sarif'
