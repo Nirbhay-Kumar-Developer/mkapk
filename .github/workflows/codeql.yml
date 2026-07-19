@@ -72,18 +72,20 @@ jobs:
                 src/modules/build_pipeline.cpp \
                 src/modules/change_checker.cpp \
                 src/modules/daemon.cpp \
-                src/modules/dex.cpp \
-                src/modules/finish.cpp \
-                src/modules/java.cpp \
-                src/modules/kotlin.cpp \
-                src/modules/native.cpp \
                 src/modules/plugin_manager.cpp \
-                src/modules/res.cpp \
+                src/modules/build_modules/dex.cpp \
+                src/modules/build_modules/finish.cpp \
+                src/modules/build_modules/java.cpp \
+                src/modules/build_modules/kotlin.cpp \
+                src/modules/build_modules/native.cpp \
+                src/modules/build_modules/res.cpp \
                 -o mkapk_bin || {
                   echo "Warning: Native header missing."
                   echo "Compiling interfaces for CodeQL extraction..."
                   g++ -std=c++17 -c -Iinclude \
-                      src/*.cpp src/modules/*.cpp || true
+                      src/*.cpp \
+                      src/modules/*.cpp \
+                      src/modules/build_modules/*.cpp || true
                 }
           fi
 
