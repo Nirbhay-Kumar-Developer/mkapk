@@ -175,6 +175,7 @@ jobs:
           package org.eclipse.aether.artifact;
           public class DefaultArtifact {
             public DefaultArtifact(String coords) {}
+            public java.io.File getFile() { return null; }
           }
           EOF
 
@@ -218,9 +219,20 @@ jobs:
           }
           EOF
 
+          cat << 'EOF' > mock_src/org/eclipse/aether/resolution/ArtifactResult.java
+          package org.eclipse.aether.resolution;
+          public class ArtifactResult {
+            public org.eclipse.aether.artifact.DefaultArtifact getArtifact() { return null; }
+            public java.io.File getFile() { return null; }
+          }
+          EOF
+
           cat << 'EOF' > mock_src/org/eclipse/aether/resolution/DependencyResult.java
           package org.eclipse.aether.resolution;
-          public class DependencyResult {}
+          import java.util.List;
+          public class DependencyResult {
+            public List<ArtifactResult> getArtifactResults() { return java.util.Collections.emptyList(); }
+          }
           EOF
 
           cat << 'EOF' > mock_src/org/eclipse/aether/util/artifact/JavaScopes.java
