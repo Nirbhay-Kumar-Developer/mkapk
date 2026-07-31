@@ -1,8 +1,8 @@
 build/
-test/build/
+test/
 bundle.sh
 bundle.cpp
-test/log.txt
-test/strace-log.txt
+test
 compile_commands.json
 to-do.txt
+.cache
