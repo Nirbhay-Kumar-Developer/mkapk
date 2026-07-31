@@ -4,12 +4,15 @@ import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
 import org.eclipse.aether.DefaultRepositorySystemSession;
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.RepositorySystemSession;
+import org.eclipse.aether.artifact.DefaultArtifactType;
 import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory;
 import org.eclipse.aether.impl.DefaultServiceLocator;
 import org.eclipse.aether.repository.LocalRepository;
+import org.eclipse.aether.repository.RepositoryPolicy;
 import org.eclipse.aether.spi.connector.RepositoryConnectorFactory;
 import org.eclipse.aether.spi.connector.transport.TransporterFactory;
 import org.eclipse.aether.transport.http.HttpTransporterFactory;
+import org.eclipse.aether.util.artifact.DefaultArtifactTypeRegistry;
 
 // Zero-DI Locking Bypasses
 import org.eclipse.aether.impl.SyncContextFactory;
@@ -22,9 +25,6 @@ import java.util.Collection;
 
 public class Booter {
 
-        /**
-     * Minimalist, programmatic Service Locator wrapper that cuts out Guice/Sisu lifecycle scans.
-     */
     public static RepositorySystem newRepositorySystem() {
         DefaultServiceLocator locator = MavenRepositorySystemUtils.newServiceLocator();
         
@@ -46,42 +46,52 @@ public class Booter {
     }
 
     /**
-     * Initializes a lightweight repo session mapped directly to local storage targets[span_7](start_span)[span_7](end_span).
+     * Initializes a lightweight repo session mapped directly to local storage targets.
      */
     public static RepositorySystemSession newRepositorySystemSession(RepositorySystem system, File localRepoDir) {
+        if (system == null) {
+            throw new IllegalStateException("RepositorySystem initialization failed. Verify that core dependencies exist inside the daemon's active classpath.");
+        }
+
         DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
 
         LocalRepository localRepo = new LocalRepository(localRepoDir);
         session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
 
-        // Disable remote tracking listeners to keep stdout clean for the C++ IPC layer[span_8](start_span)[span_8](end_span)
+        // CRITICAL FIX: Retrieve the default Maven registry (so 'pom' is preserved) and APPEND 'aar'
+        org.eclipse.aether.artifact.ArtifactTypeRegistry existingRegistry = session.getArtifactTypeRegistry();
+        DefaultArtifactTypeRegistry stereotypes;
+        
+        if (existingRegistry instanceof DefaultArtifactTypeRegistry) {
+            stereotypes = (DefaultArtifactTypeRegistry) existingRegistry;
+        } else {
+            stereotypes = new DefaultArtifactTypeRegistry();
+        }
+        
+        // includesDependencies = false (Enables transitive traversal for AARs)
+        // addedToClasspath     = true  (Includes resolved artifacts in build path)
+        stereotypes.add(new DefaultArtifactType("aar", "aar", "", "java", true, true));
+        session.setArtifactTypeRegistry(stereotypes);
+
+        session.setChecksumPolicy(RepositoryPolicy.CHECKSUM_POLICY_WARN);
+
+        // Disable remote tracking listeners to keep stdout clean for the C++ IPC layer
         session.setTransferListener(null);
         session.setRepositoryListener(null);
 
         return session;
     }
 
-    /**
-     * ============================================================================
-     * PRIVATE NESTED CLASS: NoopSyncContextFactory
-     * ============================================================================
-     * Evicts standard multi-threading/multi-process locking mechanisms[span_9](start_span)[span_9](end_span). 
-     * Signature matches the exact Type Erasure expected by Aether SPI[span_10](start_span)[span_10](end_span).
-     */
     private static class NoopSyncContextFactory implements SyncContextFactory {
         @Override
         public SyncContext newInstance(RepositorySystemSession session, boolean shared) {
             return new SyncContext() {
                 @Override
                 public void acquire(Collection<? extends Artifact> artifacts,
-                                    Collection<? extends Metadata> metadatas) {
-                    // Fast path: No locking overhead on flash storage[span_11](start_span)[span_11](end_span)
-                }
+                                    Collection<? extends Metadata> metadatas) {}
 
                 @Override
-                public void close() {
-                    // Intentional no-op stub[span_12](start_span)[span_12](end_span)
-                }
+                public void close() {}
             };
         }
     }
