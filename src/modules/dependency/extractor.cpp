@@ -12,9 +12,6 @@ namespace fs = std::filesystem;
 
 namespace MkapkExtractor {
 
-/**
- * Extracts a specific file stream from a ZIP archive to a destination path.
- */
 static bool extract_zip_entry(zip_t* archive, zip_uint64_t index, const fs::path& dest_path) {
     zip_file_t* file = zip_fopen_index(archive, index, 0);
     if (!file) return false;
@@ -36,21 +33,6 @@ static bool extract_zip_entry(zip_t* archive, zip_uint64_t index, const fs::path
     return true;
 }
 
-/**
- * Parses out the <library> (groupId.artifactId) and <version> from a cached file path.
- * Path format: .../mkapk/lib/<groupId>.<artifactId>/<version>/<artifactId>-<version>.aar
- */
-static bool parse_metadata_from_path(const fs::path& aar_path, std::string& library_name, std::string& version) {
-    try {
-        auto parent = aar_path.parent_path();
-        version = parent.filename().string();
-        library_name = parent.parent_path().filename().string();
-        return !library_name.empty() && !version.empty();
-    } catch (...) {
-        return false;
-    }
-}
-
 bool extract_aar(const std::string& aar_path) {
     fs::path aar(aar_path);
     if (!fs::exists(aar)) {
@@ -58,25 +40,15 @@ bool extract_aar(const std::string& aar_path) {
         return false;
     }
 
-    std::string library_name;
-    std::string version;
-    if (!parse_metadata_from_path(aar, library_name, version)) {
-        UI::error("Failed to parse library metadata from path", aar_path);
-        return false;
-    }
+    fs::path dest_dir = aar.parent_path();
+    std::string lib_identifier = aar.stem().string();
 
-    // Target structural cache slot directory
-    const char* prefix_env = std::getenv("PREFIX");
-    fs::path prefix = prefix_env ? fs::path(prefix_env) : "/data/data/com.termux/files/usr";
-    fs::path dest_dir = prefix / "var/lib/mkapk/lib" / library_name / version;
-
-    // Fast return if already extracted
+    // Fast Skip: Check if extracted components already exist on disk[span_8](start_span)[span_8](end_span)
     if (fs::exists(dest_dir / "AndroidManifest.xml") && fs::exists(dest_dir / "classes.jar")) {
         return true; 
     }
 
-    UI::stage("Extracting AAR", library_name + ":" + version);
-    fs::create_directories(dest_dir);
+    UI::stage("Extracting AAR", lib_identifier);
 
     int err = 0;
     zip_t* archive = zip_open(aar.string().c_str(), 0, &err);
@@ -94,7 +66,6 @@ bool extract_aar(const std::string& aar_path) {
 
         std::string entry_name(name);
 
-        // Filter and map exact targets
         if (entry_name == "AndroidManifest.xml") {
             if (!extract_zip_entry(archive, i, dest_dir / "AndroidManifest.xml")) {
                 extraction_failed = true;
@@ -106,7 +77,6 @@ bool extract_aar(const std::string& aar_path) {
             }
         } 
         else if (entry_name.rfind("res/", 0) == 0) {
-            // Keep nested directory hierarchy for drawable, values, layout, etc.
             fs::path target_res_path = dest_dir / entry_name;
             if (entry_name.back() == '/') {
                 fs::create_directories(target_res_path);
@@ -121,8 +91,10 @@ bool extract_aar(const std::string& aar_path) {
     zip_close(archive);
 
     if (extraction_failed) {
-        UI::error("Partial failure occurred during AAR extraction mapping for " + library_name);
-        fs::remove_all(dest_dir); // Prevent dirty cache state
+        UI::error("Partial failure occurred during AAR extraction mapping for " + lib_identifier);
+        fs::remove(dest_dir / "AndroidManifest.xml");
+        fs::remove(dest_dir / "classes.jar");
+        fs::remove_all(dest_dir / "res");
         return false;
     }
 
@@ -131,7 +103,7 @@ bool extract_aar(const std::string& aar_path) {
 
 void extract_all(const std::vector<std::string>& resolved_paths) {
     for (const auto& path : resolved_paths) {
-        if (path.rfind(".aar") != std::string::npos || path.size() >= 4 && path.substr(path.size() - 4) == ".aar") {
+        if (path.rfind(".aar") != std::string::npos || (path.size() >= 4 && path.substr(path.size() - 4) == ".aar")) {
             extract_aar(path);
         }
     }

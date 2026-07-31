@@ -36,10 +36,8 @@ bool merge_manifests(
 {
     UI::stage("Manifest Merger", "Merging library manifests with the primary AndroidManifest.xml");
 
-    // 1. Gather all target manifest file paths
     std::vector<std::string> target_manifests;
     
-    // Add primary application manifest
     fs::path primary_path(main_manifest);
     if (!fs::exists(primary_path)) {
         UI::error("Primary AndroidManifest.xml not found", main_manifest);
@@ -47,15 +45,17 @@ bool merge_manifests(
     }
     target_manifests.push_back(fs::absolute(primary_path).string());
 
-    // Add target output manifest destination path
-    fs::path output_path(output_manifest);
-    fs::create_directories(output_path.parent_path());
-    target_manifests.push_back(fs::absolute(output_path).string());
+    // Use a intermediate temp path in internal Termux memory to avoid /storage/emulated/0 write locks
+    fs::path final_output_path(output_manifest);
+    fs::create_directories(final_output_path.parent_path());
+    
+    fs::path temp_output_path = fs::temp_directory_path() / "merged_AndroidManifest.xml";
+    if (fs::exists(temp_output_path)) fs::remove(temp_output_path);
 
-    // Collect extracted manifests from the dependency layout
+    target_manifests.push_back(fs::absolute(temp_output_path).string());
+
     for (const auto& path : resolved_paths) {
         fs::path file_path(path);
-        // Only target AAR dependencies (JAR files do not contain manifests)
         if (file_path.extension() == ".aar") {
             std::string cached_manifest = resolve_cached_manifest_path(file_path);
             if (!cached_manifest.empty()) {
@@ -65,22 +65,18 @@ bool merge_manifests(
         }
     }
 
-    // 2. Construct the unified IPC command payload
-    // Protocol: MANIFESTMERGER|mainManifest|outputManifest|libManifest1|libManifest2|...
     std::stringstream ss;
-    ss << "manifestmerger"; // Matches the handleTask() command mapping key in our JVM Daemon
+    ss << "manifestmerger";
     for (const auto& item : target_manifests) {
         ss << "|" << item;
     }
 
-    // Convert to a flat vector of strings to route to call_java_tool
     std::vector<std::string> daemon_args;
     std::string arg;
     while (std::getline(ss, arg, '|')) {
         daemon_args.push_back(arg);
     }
 
-    // 3. Hand-off to JVM Daemon
     try {
         call_java_tool(daemon_args);
     } catch (const std::exception& e) {
@@ -88,9 +84,13 @@ bool merge_manifests(
         return false;
     }
 
-    // 4. Final verification layer
-    if (fs::exists(output_path) && fs::file_size(output_path) > 0) {
-        UI::success("Manifest integration complete: " + output_path.filename().string());
+    // Copy from internal temp storage to target output path
+    if (fs::exists(temp_output_path) && fs::file_size(temp_output_path) > 0) {
+        std::error_code ec;
+        fs::copy_file(temp_output_path, final_output_path, fs::copy_options::overwrite_existing, ec);
+        fs::remove(temp_output_path, ec);
+        
+        UI::success("Manifest integration complete: " + final_output_path.filename().string());
         return true;
     } else {
         UI::error("Merged manifest output verification failed. File not found or empty at: " + output_manifest);
