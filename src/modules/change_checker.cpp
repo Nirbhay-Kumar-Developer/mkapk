@@ -13,6 +13,7 @@
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_config.hpp"
+#include "mkapk_plugin_manager.hpp"
 
 namespace fs = std::filesystem;
 
@@ -119,7 +120,7 @@ std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
     results.mode_switched = (old_state["meta"]["mode"] != current_mode);
 
     // B: Dynamic Tool/Extension Registration Parsing
-    std::map<std::string, LanguagePlugin> installed_plugins = MkapkEnv::load_installed_plugins();
+    std::map<std::string, LanguagePlugin> installed_plugins = MkapkPluginManager::load_installed_plugins();
     
     if (installed_plugins.find(".java") == installed_plugins.end()) {
         installed_plugins[".java"] = {"java", "javac", ".java", "jvm", "", true};

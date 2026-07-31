@@ -185,7 +185,7 @@ void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_
  */
 
 // Injects classes.dex, assets, and ONLY the requested native libraries for this package task.
-void inject_assets_and_dex(
+Result<void> inject_assets_and_dex(
     const fs::path& unsigned_apk, 
     const fs::path& bin_dir, 
     const fs::path& assets_dir, 
@@ -200,7 +200,9 @@ void inject_assets_and_dex(
 
     int err = 0;
     zip_t* apk = zip_open(unsigned_apk.string().c_str(), 0, &err);
-    if (!apk) throw std::runtime_error("Compression error encounter boundary broken: Failed to open target unsigned container archive for assembly injection steps.");
+    if (!apk) {
+        return Result<void>::error("Compression error encounter boundary broken: Failed to open target unsigned container archive for assembly injection steps.");
+    }
 
     std::map<std::string, fs::path> injection_map;
     if (fs::exists(dex_file)) injection_map["classes.dex"] = dex_file;
@@ -314,12 +316,12 @@ void inject_assets_and_dex(
     }
 
     zip_close(apk);
+    return Result<void>::success();
 }
 
- // Optimizes the APK for RAM efficiency.
-
+// Optimizes the APK for RAM efficiency.
 fs::path align_apk(const std::string& ZIPALIGN, const std::string& alignment, 
-                         const fs::path& in_apk, const fs::path& bin_dir, RunFunc run_func) {
+                   const fs::path& in_apk, const fs::path& bin_dir, RunFunc run_func) {
     UI::stage("ZipAlign", "Aligning archive layout borders for RAM access page performance optimizations");
     fs::path aligned_apk = bin_dir / "aligned_temp.apk";
 
@@ -334,16 +336,15 @@ fs::path align_apk(const std::string& ZIPALIGN, const std::string& alignment,
 }
 
 // Signs the APK.
-
-void sign_apk(const std::string& APKSIGNER, const fs::path& final_apk, 
-                    const fs::path& aligned_apk, const std::string& keystore, 
-                    const std::string& alias, RunFunc run_func) {
+Result<void> sign_apk(const std::string& APKSIGNER, const fs::path& final_apk, 
+                      const fs::path& aligned_apk, const std::string& keystore, 
+                      const std::string& alias, RunFunc run_func) {
     
     UI::stage("ApkSigner", "Generating cryptographic profile signatures block into " + final_apk.filename().string());
 
     fs::path ks_path = fs::absolute(keystore);
     if (!fs::exists(ks_path)) {
-        throw std::runtime_error("Security certificate footprint missing: Security profile store file not verified at destination context: " + ks_path.string());
+        return Result<void>::error("Security certificate footprint missing: Security profile store file not verified at destination context: " + ks_path.string());
     }
 
     // Base positional arguments matching target profile signatures
@@ -369,9 +370,10 @@ void sign_apk(const std::string& APKSIGNER, const fs::path& final_apk,
     run_func(args, "ApkSigner runtime verification tracking block dropped fatal signature errors.");
 
     if (fs::exists(aligned_apk)) fs::remove(aligned_apk);
+    return Result<void>::success();
 }
 
-std::pair<std::string, std::string> handle_debug_keystore() {
+Result<std::pair<std::string, std::string>> handle_debug_keystore() {
     const char* home_env = std::getenv("HOME");
     fs::path home;
 
@@ -425,9 +427,9 @@ std::pair<std::string, std::string> handle_debug_keystore() {
                 UI::warn("Failed to wait for the active keytool generation subprocess tracking thread.");
             }
         } else {
-            throw std::runtime_error("Security certificate generation failure: posix_spawn failed to execute 'keytool'.");
+            return Result<std::pair<std::string, std::string>>::error("Security certificate generation failure: posix_spawn failed to execute 'keytool'.");
         }
     }
     
-    return {debug_ks.string(), "androiddebugkey"};
+    return Result<std::pair<std::string, std::string>>::success({debug_ks.string(), "androiddebugkey"});
 }

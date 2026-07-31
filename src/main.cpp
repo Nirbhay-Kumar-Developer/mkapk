@@ -7,6 +7,7 @@
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
+#include "mkapk_plugin_manager.hpp"
 
 namespace fs = std::filesystem;
 
@@ -175,7 +176,7 @@ int main(int argc, char* argv[]) {
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
-            bool success = MkapkEnv::install_plugin(args[1]);
+            bool success = MkapkPluginManager::install_plugin(args[1]);
             std::cerr.rdbuf(old_cerr_buf);
             return success ? 0 : 1;
         }
@@ -186,7 +187,7 @@ int main(int argc, char* argv[]) {
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
-            bool success = MkapkEnv::uninstall_plugin(args[1]);
+            bool success = MkapkPluginManager::uninstall_plugin(args[1]);
             std::cerr.rdbuf(old_cerr_buf);
             return success ? 0 : 1;
         }

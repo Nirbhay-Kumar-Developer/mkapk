@@ -9,63 +9,79 @@
 
 namespace fs = std::filesystem;
 
-using RunFunc = std::function<void(const std::vector<std::string>&, const std::string&)>;
+using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
-
-void compile_resources(
+Result<void> compile_resources(
     const std::string& AAPT2,
     const fs::path& res_dir,
     const fs::path& bin_dir,
     RunFunc run_func,
-    const std::vector<fs::path>* changed_res_files) 
+    const std::vector<fs::path>* changed_res_files,
+    const std::vector<fs::path>& extra_dependency_res_dirs)
 {
     fs::path flat_dir = bin_dir / "flat_res";
     fs::create_directories(flat_dir);
 
-    if (!fs::exists(res_dir)) {
-        UI::error("Resource directory not found context check dropped matching path", res_dir.string());
-        return;
-    }
+    // --- PHASE 1: PROCESS CORE APPLICATION RESOURCES ---
+    if (fs::exists(res_dir)) {
+        if (changed_res_files == nullptr) {
+            UI::stage(UI::Msg::RES_STAGE, "Compiling all localized targets via aapt2");
+            
+            std::vector<std::string> args = {
+                AAPT2, "compile",
+                "--dir", fs::absolute(res_dir).string(),
+                "-o", fs::absolute(flat_dir).string()
+            };
+            run_func(args, "Full resource compilation failed");
+        } 
+        else if (!changed_res_files->empty()) {
+            UI::stage(UI::Msg::RES_STAGE, "Batch compilation pass for " + std::to_string(changed_res_files->size()) + " files");
 
-    // Case 1: First build or force-all rebuild (changed_res_files is nullptr)
-    if (changed_res_files == nullptr) {
-        UI::stage(UI::Msg::RES_STAGE, "Compiling all localized targets via aapt2");
-        
-        std::vector<std::string> args = {
-            AAPT2, "compile",
-            "--dir", fs::absolute(res_dir).string(),
-            "-o", fs::absolute(flat_dir).string()
-        };
-        run_func(args, "Full resource compilation failed");
+            std::vector<std::string> args = {
+                AAPT2, "compile",
+                "-o", fs::absolute(flat_dir).string()
+            };
 
-    } 
-    // Case 2: Incremental build (Batching specific files)
-    else if (!changed_res_files->empty()) {
-        UI::stage(UI::Msg::RES_STAGE, "Batch compilation pass for " + std::to_string(changed_res_files->size()) + " files");
-
-        std::vector<std::string> args = {
-            AAPT2, "compile",
-            "-o", fs::absolute(flat_dir).string()
-        };
-
-        // Resolve absolute paths for the background JVM/Daemon safety
-        for (const auto& f : *changed_res_files) {
-            args.push_back(fs::absolute(f).string());
+            for (const auto& f : *changed_res_files) {
+                args.push_back(fs::absolute(f).string());
+            }
+            
+            run_func(args, "Batch resource compilation failed");
+        } 
+        else {
+            UI::info("No core resource modifications tracked by change engine.");
         }
-        
-        run_func(args, "Batch resource compilation failed");
-    } 
-    // Case 3: No changes detected by the hash checker
-    else {
-        UI::info("No resource modifications tracked by change engine.");
+    } else {
+        UI::warn("Primary resource directory not located at: " + res_dir.string());
     }
+
+    // --- PHASE 2: PROCESS EXTRA AAR LIBRARY DEPENDENCY RESOURCE TREES ---
+    if (!extra_dependency_res_dirs.empty()) {
+        for (const auto& extra_res : extra_dependency_res_dirs) {
+            if (fs::exists(extra_res) && !fs::is_empty(extra_res)) {
+                
+                std::string lib_name = extra_res.parent_path().parent_path().filename().string();
+                std::string lib_version = extra_res.parent_path().filename().string();
+                
+                fs::path lib_out_arc = flat_dir / (lib_name + "_" + lib_version + ".flata");
+
+                if (!fs::exists(lib_out_arc)) {
+                    std::vector<std::string> extra_args = {
+                        AAPT2, "compile",
+                        "--dir", fs::absolute(extra_res).string(),
+                        "-o", fs::absolute(lib_out_arc).string()
+                    };
+                    
+                    UI::info("[+] Compiling library resources: " + lib_name);
+                    run_func(extra_args, "Failed compilation of external dependency resource directory tree: " + extra_res.string());
+                }
+            }
+        }
+    }
+    return Result<void>::success();
 }
 
-/**
- * (Step ii) Links compiled resources and manifest to produce the base APK.
- * Ported: R.java generation in src_dir and absolute path linkage.
- */
-void link_manifest(
+Result<void> link_manifest(
     const std::string& AAPT2,
     const fs::path& unsigned_apk,
     const fs::path& android_jar,
@@ -77,8 +93,6 @@ void link_manifest(
 {
     UI::stage("Resource Linker", debug ? "Assembling development variant (DEBUG)" : "Assembling production variant");
 
-    // 1. Dependency Existence Checks (Robustness)
-    // Prevents AAPT2 from executing and returning obscure backend errors if core files are missing.
     if (!fs::exists(manifest)) {
         throw std::runtime_error("Manifest missing: Cannot link resources without a valid AndroidManifest.xml at " + manifest.string());
     }
@@ -91,35 +105,51 @@ void link_manifest(
         throw std::runtime_error("Compilation path context empty: No verified intermediate .flat asset data ready for link passes.");
     }
 
-    // 2. Generation Directory Fix (Bug Patch)
-    // Ensures R.java is output to the bin directory where the Java compiler expects it, 
-    // rather than polluting the user's source tree.
     fs::path gen_dir = bin_dir / "gen";
     fs::create_directories(gen_dir);
 
-    // 3. Command Construction
     std::vector<std::string> args = {
         AAPT2, "link",
         "-o", fs::absolute(unsigned_apk).string(),
         "-I", fs::absolute(android_jar).string(),
         "--manifest", fs::absolute(manifest).string(),
-        "--java", fs::absolute(gen_dir).string(), // Patched: Targets bin_dir/gen
+        "--java", fs::absolute(gen_dir).string(), 
         "--auto-add-overlay"
     };
 
-    // 4. Secure File Gathering
-    // Added is_regular_file() check to prevent AAPT2 from choking on rogue directories.
+    std::vector<std::string> library_archives;
+
+    // FIX: Safely route AAR libraries to the -R flag, while keeping app resources positional
     for (const auto& entry : fs::directory_iterator(flat_dir)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".flat") {
-            args.push_back(fs::absolute(entry.path()).string());
+        if (entry.is_regular_file()) {
+            std::string ext = entry.path().extension().string();
+            if (ext == ".flat") {
+                // Positional inputs (Strict AAPT2 deduping applied)
+                args.push_back(fs::absolute(entry.path()).string());
+            } else if (ext == ".flata") {
+                // Collect library archives for ordered -R injection
+                library_archives.push_back(fs::absolute(entry.path()).string());
+            }
         }
+    }
+
+    // Sort alphabetically so appcompat always merges before material
+    std::sort(library_archives.begin(), library_archives.end());
+
+    // Inject the -R flags to enable AAPT2 library resource merging
+    for (const auto& arc : library_archives) {
+        args.push_back("-R");
+        args.push_back(arc);
     }
 
     if (debug) {
         args.push_back("--debug-mode");
     }
 
-    run_func(args, "Manifest asset linking generation dropped errors.");
+    auto res = run_func(args, "Manifest asset linking generation dropped errors.");
+    if (res.is_err()) return res;
+
+    return Result<void>::success();
 }
 
 fs::path obfuscate_resources(

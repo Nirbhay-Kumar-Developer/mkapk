@@ -222,63 +222,32 @@ namespace MkapkEnv {
     if (fs::exists(d8_jar)) cp_entries.push_back(d8_jar.string());
     if (fs::exists(resguard_jar)) cp_entries.push_back(resguard_jar.string());
     
-    if (fs::exists(kotlin_preloader)) cp_entries.push_back(kotlin_preloader.string());
-    else UI::error("Kotlin Compiler installation not found at standard path");
-
-    // ============================================================================
+        // ============================================================================
     // 2. DYNAMIC ANDROID SDK COMPONENT INJECTIONS
     // ============================================================================
-        std::vector<fs::path> sdk_dependencies = {
-            cmdline_lib / "build-system/tools.manifest-merger.jar",
-            cmdline_lib / "zipflinger/zipflinger.jar",
-            cmdline_lib / "external/google/jimfs/jimfs/1.1/jimfs-1.1.jar",
-            cmdline_lib / "org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar",
-            cmdline_lib / "common.jar",
-            cmdline_lib / "slf4j-nop-2.0.16.jar"
-    };
-
-    for (const auto& jar_path : sdk_dependencies) {
-        if (fs::exists(jar_path)) {
-            cp_entries.push_back(jar_path.string());
-        } else if (jar_path.filename() == "slf4j-nop-2.0.16.jar") {
-            // Check alternative nested layout path strategy: external/org/slf4j/... if missing from main lib root
-            fs::path alt_nop = cmdline_lib / "org/slf4j/slf4j-nop/2.0.16/slf4j-nop-2.0.16.jar";
-            if (fs::exists(alt_nop)) cp_entries.push_back(alt_nop.string());
-        }
-    }
-
-   // 3. MINIMAL MAVEN RESOLVER & PLEXUS SHARE MATRIX ($PREFIX/share/java/)
-            std::vector<std::string> prefix_java_jars = {
-        "maven-artifact-3.9.6.jar",
-        "maven-builder-support-3.9.6.jar",
-        "maven-model-3.9.6.jar",
-        "maven-model-builder-3.9.6.jar",
-        "maven-repository-metadata-3.9.6.jar",
-        "maven-resolver-api-1.9.18.jar",
-        "maven-resolver-impl-1.9.18.jar",
-        "maven-resolver-named-locks-1.9.18.jar",
-        "maven-resolver-provider-3.9.6.jar",
-        "maven-resolver-spi-1.9.18.jar",
-        "maven-resolver-util-1.9.18.jar",
-        "maven-resolver-connector-basic-1.9.18.jar",
-        "maven-resolver-transport-http-1.9.18.jar",
-        "plexus-interpolation-1.26.jar",
-        "plexus-utils-3.5.1.jar"
-    };
-
-    for (const auto& jar_name : prefix_java_jars) {
-        fs::path target_jar = prefix_java / jar_name;
-        if (fs::exists(target_jar)) {
-            cp_entries.push_back(target_jar.string());
-        } else {
-            // Graceful fallback to locate it if user drops the cache explicitly within locally defined custom mappings
-            fs::path fallback_local = resolve_path("~/lib") / jar_name;
-            if (fs::exists(fallback_local)) {
-                cp_entries.push_back(fallback_local.string());
-            } else {
-                UI::warn("Required runtime core dependency element could not be verified: " + jar_name);
+    if (fs::exists(cmdline_lib)) {
+        for (const auto& entry : fs::recursive_directory_iterator(cmdline_lib)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".jar") {
+                std::string filename = entry.path().filename().string();
+                
+                // FILTER: Exclude internal SDK Kotlin jars to prevent ClassCastExceptions in Kotlinc
+                if (filename.find("kotlin") == std::string::npos) {
+                    cp_entries.push_back(entry.path().string());
+                }
             }
         }
+    } else {
+        UI::warn("Android SDK cmdline-tools missing at: " + cmdline_lib.string());
+    }
+
+    if (fs::exists(prefix_java)) {
+        for (const auto& entry : fs::directory_iterator(prefix_java)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".jar") {
+                cp_entries.push_back(entry.path().string());
+            }
+        }
+    } else {
+        UI::warn("System Java share directory missing at: " + prefix_java.string());
     }
         // 4. CLASSPATH FORMAT ASSEMBLER LOOP
    std::string full_cp = "";
