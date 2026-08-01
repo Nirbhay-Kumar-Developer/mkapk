@@ -27,7 +27,7 @@ jobs:
           - language: c-cpp
             build-mode: manual
           - language: java-kotlin
-            build-mode: manual
+            build-mode: none
 
     steps:
       - name: Checkout repository
@@ -72,77 +72,26 @@ jobs:
                 src/modules/build_pipeline.cpp \
                 src/modules/change_checker.cpp \
                 src/modules/daemon.cpp \
-                src/modules/plugin_manager.cpp \
+                src/modules/plugins/plugin_manager.cpp \
                 src/modules/build_modules/dex.cpp \
                 src/modules/build_modules/finish.cpp \
                 src/modules/build_modules/java.cpp \
                 src/modules/build_modules/kotlin.cpp \
                 src/modules/build_modules/native.cpp \
                 src/modules/build_modules/res.cpp \
+                src/modules/dependency/extracter.cpp \
+                src/modules/dependency/manifest_merger.cpp \
+                src/modules/dependency/resolver.cpp \
                 -o mkapk_bin || {
                   echo "Warning: Native header missing."
                   echo "Compiling interfaces for CodeQL extraction..."
                   g++ -std=c++17 -c -Iinclude \
                       src/*.cpp \
                       src/modules/*.cpp \
-                      src/modules/build_modules/*.cpp || true
+                      src/modules/build_modules/*.cpp \
+                      src/modules/dependency/*.cpp \
+                      src/modules/plugins/*.cpp || true
                 }
-          fi
-
-      # --- MANUAL BUILD FOR JAVA/KOTLIN ---
-      - name: Build Java & Kotlin Sources
-        if: matrix.language == 'java-kotlin'
-        shell: bash
-        run: |
-          RESGUARD_JAR=$(find . -name "AndResGuard-cli-1.2.15.jar" \
-            | head -n 1)
-          CP_ARGS=""
-          if [ ! -z "$RESGUARD_JAR" ]; then
-            CP_ARGS="-cp $RESGUARD_JAR"
-          fi
-
-          if [ -f java/com/mkapk/tools/MkapkTools.java ]; then
-            javac $CP_ARGS java/com/mkapk/tools/MkapkTools.java || {
-              echo "Direct compilation failed due to missing dependencies."
-              echo "Creating structural stubs for CodeQL tracing..."
-              mkdir -p mock_src/com/android/tools/r8 \
-                       mock_src/com/tencent/mm/resourceproguard/cli \
-                       mock_src/com/android/apksigner \
-                       mock_src/org/jetbrains/kotlin/preloading
-
-              # Safely split strings to keep lines under 80 chars
-              echo "package com.android.tools.r8;"\
-              "public class D8 { public static void main(String[] a){} }"\
-              > mock_src/com/android/tools/r8/D8.java
-
-              echo "package com.android.tools.r8;"\
-              "public class R8 { public static void main(String[] a){} }"\
-              > mock_src/com/android/tools/r8/R8.java
-
-              echo "package com.tencent.mm.resourceproguard.cli;"\
-              "public class CliMain {"\
-              "public static void main(String[] a){} }"\
-              > mock_src/com/tencent/mm/resourceproguard/cli/CliMain.java
-
-              echo "package com.android.apksigner;"\
-              "public class ApkSignerTool {"\
-              "public static void main(String[] a){} }"\
-              > mock_src/com/android/apksigner/ApkSignerTool.java
-
-              echo "package org.jetbrains.kotlin.preloading;"\
-              "public class Preloader {"\
-              "public static void main(String[] a){} }"\
-              > mock_src/org/jetbrains/kotlin/preloading/Preloader.java
-
-              javac -sourcepath mock_src java/com/mkapk/tools/MkapkTools.java
-            }
-          fi
-
-          if [ -d test/src ]; then
-            find test/src -name "*.java" > java_sources.txt
-            if [ -s java_sources.txt ]; then
-              javac -allow-empty @java_sources.txt || true
-            fi
           fi
 
       - name: Perform CodeQL Analysis
@@ -180,3 +129,4 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'megalinter-reports/megalinter-report.sarif'
+          
