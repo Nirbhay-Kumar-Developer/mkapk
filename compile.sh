@@ -14,7 +14,7 @@ echo ">> Build Mode: $BUILD_MODE"
 
 # --- Paths ---
 PKG_NAME="mkapk-aarch64"
-STORAGE_PATH="/storage/emulated/0/Programming/mkapk"
+STORAGE_PATH="$(pwd)"
 LOCAL_PATH="$HOME/mkapk_tmp_build"
 CACHE_DIR="$LOCAL_PATH/.cache"
 
