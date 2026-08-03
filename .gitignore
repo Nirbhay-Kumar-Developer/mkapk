@@ -1,7 +1,5 @@
 build/
-test/build/
 bundle.sh
 bundle.cpp
-test/log.txt
-test/strace-log.txt
+test/,
 compile_commands.json
