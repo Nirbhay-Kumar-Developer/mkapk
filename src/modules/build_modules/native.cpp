@@ -12,7 +12,7 @@
 
 namespace fs = std::filesystem;
 
-using RunFunc = std::function<void(const std::vector<std::string>&, const std::string&)>;
+using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 // Ported ARCH_MAP for standard Android NDK triplets
 static std::map<std::string, std::string> ARCH_MAP = {
