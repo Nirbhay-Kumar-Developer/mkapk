@@ -6,10 +6,11 @@
 #include <functional>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
+#include "mkapk_result.hpp"
 
 namespace fs = std::filesystem;
 
-using RunFunc = std::function<void(const std::vector<std::string>&, const std::string&)>;
+using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 /**
  * Utility to collect all .class files.
@@ -39,14 +40,14 @@ std::vector<std::string> get_all_class_files(const fs::path& bin_dir) {
  * Converts .class files to .dex incrementally.
  * Processed here inside dex.cpp to isolate D8 interactions.
  */
-void run_incremental_dex(const std::string& D8,
+Result<void> run_incremental_dex(const std::string& D8,
                          const fs::path& android_jar,
                          const fs::path& src_path,
                          const fs::path& java_out,
                          const fs::path& dex_cache,
                          const std::vector<fs::path>& files_to_dex,
                          RunFunc run) {
-    if (files_to_dex.empty()) return;
+    if (files_to_dex.empty()) return Result<void>::success();
 
     for (const auto& src_file : files_to_dex) {
         fs::path rel_path = fs::relative(src_file, src_path);
@@ -73,9 +74,11 @@ void run_incremental_dex(const std::string& D8,
                 "--classpath", fs::absolute(java_out).string(),
                 "--output", fs::absolute(target_dex_dir).string()
             };
+            
             for (const auto& cls : family_classes) d8_args.push_back(cls);
 
-            run(d8_args, "Incremental D8 failed for: " + base_name);
+            auto res = run(d8_args, "Incremental D8 failed for: " + base_name);
+            if (res.is_err()) return res;
 
             fs::path gen_dex = target_dex_dir / "classes.dex";
             fs::path final_dex = target_dex_dir / (base_name + ".dex");
@@ -84,12 +87,13 @@ void run_incremental_dex(const std::string& D8,
             }
         }
     }
+    return Result<void>::success();
 }
 
 /**
  * (Step iv) Converts .class files using R8.
  */
-void run_dex_r8(
+Result<void> run_dex_r8(
     const std::string& R8_TOOL,
     const fs::path& android_jar,
     const MkapkConfig& config,
@@ -103,8 +107,7 @@ void run_dex_r8(
     std::vector<std::string> class_files = get_all_class_files(bin_dir_path);
 
     if (class_files.empty()) {
-        std::cerr << "!! Error: No class files found for R8. Check compiler output." << std::endl;
-        std::exit(1); 
+        return Result<void>::error("No class files found for R8. Check compiler output.");
     }
 
     // --- SOLUTION 3: RESOLVE JETBRAINS ANNOTATIONS PATH ---
@@ -147,13 +150,16 @@ void run_dex_r8(
         args.push_back(file);
     }
 
-    run_func(args, "R8 optimization failed");
+    auto res = run_func(args, "R8 optimization failed");
+    if (res.is_err()) return res;
+
+    return Result<void>::success();
 }
 
 /**
  * (Step iv Alternate) Merges incrementally dexed files using D8.
  */
-void run_dex_d8(
+Result<void> run_dex_d8(
     const std::string& D8_TOOL,
     const fs::path& android_jar,
     const fs::path& bin_dir,
@@ -163,19 +169,25 @@ void run_dex_d8(
     std::cout << ">> [DEX] Merging with D8..." << std::endl;
 
     fs::path bin_dir_path = fs::absolute(bin_dir);
-    std::vector<std::string> all_dex;
+    std::vector<std::string> inputs;
 
+    // 1. First, check if incremental .dex files exist in dex_cache
     if (fs::exists(dex_cache)) {
         for (const auto& entry : fs::recursive_directory_iterator(dex_cache)) {
             if (entry.is_regular_file() && entry.path().extension() == ".dex") {
-                all_dex.push_back(fs::absolute(entry.path()).string());
+                inputs.push_back(fs::absolute(entry.path()).string());
             }
         }
     }
 
-    if (all_dex.empty()) {
-        std::cerr << "!! Error: No DEX files found in cache. Did incremental dexing fail?" << std::endl;
-        std::exit(1);
+    // 2. Fallback: If no .dex files exist, gather all compiled .class files directly
+    if (inputs.empty()) {
+        std::cout << ">> [DEX] No cached .dex files found. Fallback to compiling .class files..." << std::endl;
+        inputs = get_all_class_files(bin_dir_path);
+    }
+
+    if (inputs.empty()) {
+        return Result<void>::error("No .dex or .class files found for D8. Check compiler output.");
     }
 
     std::vector<std::string> args = {
@@ -184,9 +196,12 @@ void run_dex_d8(
         "--output", bin_dir_path.string()
     };
 
-    for (const auto& dex : all_dex) {
-        args.push_back(dex);
+    for (const auto& input : inputs) {
+        args.push_back(input);
     }
 
-    run_func(args, "D8 merge failed");
+    auto res = run_func(args, "D8 merge failed");
+    if (res.is_err()) return res;
+
+    return Result<void>::success();
 }

@@ -9,16 +9,11 @@
 #include <utility>
 #include <functional>
 #include "mkapk_config.hpp"
+#include "mkapk_result.hpp"
 
 namespace fs = std::filesystem;
 
-/**
- * ============================================================================
- * SECTION 1: COMMON TYPES & CALLBACKS
- * ============================================================================
- */
-
-using RunFunc = std::function<void(const std::vector<std::string>&, const std::string&)>;
+using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 struct LanguagePlugin {
     std::string name;                  
@@ -29,19 +24,16 @@ struct LanguagePlugin {
     bool is_verified = false;          
 };
 
-// Comprehensive result structure for dynamic plugin change detection logic
 struct BuildResults {
     bool mode_switched = false;
     bool src_changed = false;
     bool res_changed = false;
     bool manifest_changed = false;
     
-    // Extensible dynamic dictionary replacing static hardcoded vectors
     std::map<std::string, std::vector<fs::path>> changed_files;
     std::map<std::string, std::vector<fs::path>> deleted_files;
     std::vector<fs::path> changed_resources;
 
-    // Helper to determine if any build action is required across core or plugins
     bool any_changes() const {
         if (src_changed || res_changed || manifest_changed || mode_switched) {
             return true;
@@ -53,32 +45,17 @@ struct BuildResults {
     }
 };
 
-/**
- * ============================================================================
- * SECTION 2: CHANGE DETECTION (Standalone)
- * ============================================================================
- */
-
 std::string get_file_hash(const fs::path& file_path);
 std::map<std::string, std::string> scan_directory(const fs::path& dir_path);
 
-// Updated: Change detection engine can now evaluate against dynamic registered plugins
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
     const fs::path& bin_dir, 
     const std::string& config_content, 
     bool force_all
 );
 
-void save_state(const fs::path& bin_dir, const std::map<std::string, std::string>& state);
-
-/**
- * ============================================================================
- * SECTION 3: JAVA & KOTLIN COMPILATION
- * ============================================================================
- */
-
-// Java Module
-void compile_incremental_java(
+// JVM Stage
+Result<void> compile_incremental_java(
     const std::string& version,
     const std::vector<std::string>& flags,
     const fs::path& android_jar,
@@ -87,33 +64,17 @@ void compile_incremental_java(
     RunFunc run_func
 );
 
-// Kotlin Module
-bool compile_incremental_kotlin(
+Result<void> compile_incremental_kotlin(
     const std::string& KOTLINC,
     const fs::path& android_jar,
     const fs::path& classes_dir,
     const std::vector<fs::path>& changed_files,
     RunFunc run_func,
-    const std::string& compose_plugin = "",
-    const std::vector<std::string>& classpath_extra = {}
-);
-
-bool compile_kotlin(
-    const std::string& KOTLINC,
-    const fs::path& android_jar,
-    const fs::path& classes_dir,
-    const fs::path& src_dir,
-    RunFunc run_func,
     const std::string& compose_plugin = ""
 );
 
-/**
- * ============================================================================
- * SECTION 4: RESOURCE MANAGEMENT (AAPT2)
- * ============================================================================
- */
-
-void compile_resources(
+// Resources
+Result<void> compile_resources(
     const std::string& AAPT2,
     const fs::path& res_dir,
     const fs::path& bin_dir,
@@ -121,7 +82,7 @@ void compile_resources(
     const std::vector<fs::path>* changed_res_files = nullptr
 );
 
-void link_manifest(
+Result<void> link_manifest(
     const std::string& AAPT2,
     const fs::path& unsigned_apk,
     const fs::path& android_jar,
@@ -139,12 +100,7 @@ fs::path obfuscate_resources(
     RunFunc run_func
 );
 
-/**
- * ============================================================================
- * SECTION 5: NATIVE COMPILATION (NDK)
- * ============================================================================
- */
-
+// Native Stage
 bool compile_native(
     const std::string& NDK_BIN, 
     const fs::path& src_dir,
@@ -156,13 +112,8 @@ bool compile_native(
     const std::vector<NativeTargetConfig>& native_targets
 );
 
-/**
- * ============================================================================
- * SECTION 6: DEXING (D8 / R8)
- * ============================================================================
- */
-
-void run_dex_r8(
+// Dexing
+Result<void> run_dex_r8(
     const std::string& R8_TOOL,
     const fs::path& android_jar,
     const MkapkConfig& config,
@@ -171,7 +122,7 @@ void run_dex_r8(
     bool no_obs = false
 );
 
-void run_dex_d8(
+Result<void> run_dex_d8(
     const std::string& D8_TOOL,
     const fs::path& android_jar,
     const fs::path& bin_dir,
@@ -179,7 +130,7 @@ void run_dex_d8(
     RunFunc run_func
 );
 
-void run_incremental_dex(
+Result<void> run_incremental_dex(
     const std::string& D8,
     const fs::path& android_jar,
     const fs::path& src_path,
@@ -189,13 +140,8 @@ void run_incremental_dex(
     RunFunc run
 );
 
-/**
- * ============================================================================
- * SECTION 7: PACKAGING & SIGNING
- * ============================================================================
- */
-
-void inject_assets_and_dex(
+// FIX: Packaging components now return Result configurations
+Result<void> inject_assets_and_dex(
     const fs::path& unsigned_apk, 
     const fs::path& bin_dir, 
     const fs::path& assets_dir, 
@@ -211,7 +157,7 @@ fs::path align_apk(
     RunFunc run_func
 );
 
-void sign_apk(
+Result<void> sign_apk(
     const std::string& APKSIGNER, 
     const fs::path& final_apk, 
     const fs::path& aligned_apk, 
@@ -220,12 +166,6 @@ void sign_apk(
     RunFunc run_func
 );
 
-void to_place_system_libraries(
-    const std::string& config_content, 
-    const fs::path& bin_dir, 
-    const std::vector<std::string>& arch_list
-);
-
-std::pair<std::string, std::string> handle_debug_keystore();
+Result<std::pair<std::string, std::string>> handle_debug_keystore();
 
 #endif // MKAPK_TOOLS_HPP
