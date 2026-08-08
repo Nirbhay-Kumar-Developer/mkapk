@@ -82,19 +82,18 @@ namespace MkapkEnv {
         try {
             json j = json::parse(config_content);
 
-            // Empty strings match the exact behavior of original get_json_val()
-            config.project_name   = j.value("NAME", "");
-            config.bin_dir        = j.value("BIN_DIR", "");
-            config.src_dir        = j.value("SRC_DIR", "");
-            config.res_dir        = j.value("RES_DIR", "");
-            config.assets_dir     = j.value("ASSETS_DIR", "");
-            config.manifest       = j.value("MANIFEST", "");
+            config.project_name   = j.value("NAME", "MyApp");
+            config.bin_dir        = j.value("BIN_DIR", "bin");
+            config.src_dir        = j.value("SRC_DIR", "src");
+            config.res_dir        = j.value("RES_DIR", "res");
+            config.assets_dir     = j.value("ASSETS_DIR", "assets");
+            config.manifest       = j.value("MANIFEST", "AndroidManifest.xml");
             
-            config.sdk_root       = j.value("SDK_ROOT", "");
-            config.target_sdk     = j.value("TARGET_SDK", "");
-            config.java_version   = j.value("JAVA_VERSION", "");
+            config.sdk_root       = j.value("SDK_ROOT", "/data/data/com.termux/files/home/android-sdk/Sdk");
+            config.target_sdk     = j.value("TARGET_SDK", "33");
+            config.java_version   = j.value("JAVA_VERSION", "17");
             config.compose_plugin = j.value("COMPOSE_PLUGIN", "");
-            config.proguard_rules = j.value("PROGUARD_RULES", "");
+            config.proguard_rules = j.value("PROGUARD_RULES", "proguard-rules.pro");
             
             config.keystore       = j.value("KEYSTORE", "");
             config.keystore_alias = j.value("KEYSTORE_ALIAS", "");
@@ -262,7 +261,7 @@ namespace MkapkEnv {
 
     bool init_project() {
         
-        const fs::path TEMPLATE_PATH = fs::path(TERMUX_ETC) / "setup/proj-templates/android";
+        const fs::path TEMPLATE_PATH = fs::path(TERMUX_ETC) / ".setup/proj-templates/android";
         UI::stage("Initialization", "Seeding default template paths structure");
 
         if (!fs::exists(TEMPLATE_PATH)) {

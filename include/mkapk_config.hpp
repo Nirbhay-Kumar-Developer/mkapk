@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <filesystem>
 
 // Defined here to eliminate circular include dependencies cleanly
 struct NativeTargetConfig {
@@ -37,6 +38,9 @@ struct MkapkConfig {
     // Security
     std::string keystore;
     std::string keystore_alias;
+    
+    // Dependencies
+    std::vector<std::string> dependencies;
 
     // Validation Flag
     bool is_valid = false;
