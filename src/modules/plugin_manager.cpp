@@ -32,7 +32,7 @@ namespace MkapkEnv {
      * and writes verified plugin definitions to the storage cache registry.
      */
     bool install_plugin(const std::string& pl_package_path) {
-        fs::path src_zip = resolve_path(pl_package_path);
+        fs::path src_zip = MkapkEnv::resolve_path(pl_package_path);
         if (!fs::exists(src_zip)) {
             UI::error("Plugin bundle tracking entry location could not be verified", src_zip.string());
             return false;
@@ -61,7 +61,7 @@ namespace MkapkEnv {
         UI::info("Decompressing raw extension components data payloads into isolated enclave...");
         
         // Use '-j' flag to completely flatten directories (prevents ZipSlip / Path Traversal)
-        if (!run_system_cmd({"unzip", "-j", "-q", src_zip.string(), "-d", staging_dir.string()})) {
+        if (!MkapkEnv::run_system_cmd({"unzip", "-j", "-q", src_zip.string(), "-d", staging_dir.string()})) {
             UI::error("Failed to unpack targeted extension installer bundle wrapper safely.");
             return false; // RAII guard automatically cleans up
         }
@@ -88,7 +88,7 @@ namespace MkapkEnv {
         }
 
         // Run validation securely using the modern pkeyutl utility against the static file
-        bool verified_stamp = run_system_cmd({
+        bool verified_stamp = MkapkEnv::run_system_cmd({
             "openssl", "pkeyutl",
             "-verify",
             "-pubin",
@@ -151,7 +151,7 @@ namespace MkapkEnv {
             if (!apt_pkg.empty()) {
                 UI::info("Binary interface missing locally. Bridging tool discovery channels securely to Termux package indexes: " + apt_pkg);
                 
-                if (!run_system_cmd({"apt", "install", "-y", apt_pkg})) {
+                if (!MkapkEnv::run_system_cmd({"apt", "install", "-y", apt_pkg})) {
                     UI::warn("Automated apt synchronization engine tracking returned execution anomaly flags.\n"
                              "   Please implement standalone terminal tracking steps for binary path: '" + comp_bin + "' manual installations.");
                 }

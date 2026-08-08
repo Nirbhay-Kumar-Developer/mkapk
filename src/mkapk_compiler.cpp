@@ -11,10 +11,11 @@
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_config.hpp"
+#include "mkapk_result.hpp"
 
 namespace fs = std::filesystem;
 
-using RunFunc = std::function<void(const std::vector<std::string>&, const std::string&)>;
+using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 /**
  * Removes compiled .class and .dex files when the source is deleted.
@@ -44,9 +45,8 @@ void cleanup_stale_assets(const std::map<std::string, std::vector<fs::path>>& de
 
 /**
  * Executes a dynamic compilation process for a registered language plugin.
- * Handles configuration mapping polymorphicly for JVM and Native systems.
  */
-void execute_plugin_compiler(
+Result<void> execute_plugin_compiler(
     const LanguagePlugin& plugin,
     const std::vector<fs::path>& files,
     const fs::path& java_out,
@@ -54,7 +54,7 @@ void execute_plugin_compiler(
     const fs::path& android_jar,
     RunFunc run) 
 {
-    if (files.empty()) return;
+    if (files.empty()) return Result<void>::success();
 
     std::string details = "Compiling " + std::to_string(files.size()) + " files via " + plugin.compiler;
     if (plugin.is_verified) {
@@ -64,35 +64,30 @@ void execute_plugin_compiler(
 
     std::vector<std::string> args = { plugin.compiler };
 
-    // Polymorphic structural flag configurations mapping to core system types
     if (plugin.output_type == "jvm") {
-        // Formulate standard Java Virtual Machine arguments setup
         args.push_back("-classpath");
         args.push_back(fs::absolute(android_jar).string() + ":" + fs::absolute(java_out).string());
         args.push_back("-d");
         args.push_back(fs::absolute(java_out).string());
     } else if (plugin.output_type == "native") {
-        // Native linking targets matching intermediate build paths
         fs::path native_out_dir = bin_dir / "libs" / "obj";
         fs::create_directories(native_out_dir);
         
-        args.push_back("-c"); // Standard compiler instruction
+        args.push_back("-c"); 
         args.push_back("-I" + fs::absolute(android_jar).parent_path().string());
     }
 
-    // Append localized source files targets list
     for (const auto& path : files) {
         args.push_back(fs::absolute(path).string());
     }
 
-    run(args, plugin.name + " pipeline execution error");
+    return run(args, plugin.name + " pipeline execution error");
 }
 
 /**
  * Orchestrates joint source compilation tasks dynamically.
- * UPDATED: Resolves circular Kotlin -> Java dependencies through unified Joint-Compilation.
  */
-std::pair<fs::path, fs::path> compile_source_logic(
+Result<std::pair<fs::path, fs::path>> compile_source_logic(
     const MkapkConfig& config,
     std::map<std::string, std::string>& tools,
     const std::map<std::string, LanguagePlugin>& active_plugins,
@@ -101,9 +96,9 @@ std::pair<fs::path, fs::path> compile_source_logic(
     std::map<std::string, std::vector<fs::path>>& changed_files,
     std::map<std::string, std::vector<fs::path>>& deleted_files,
     bool do_res,
-    RunFunc run) {
+    RunFunc run) 
+{
 
-    // Unified destination directory for classes to let Java reference custom dependencies seamlessly
     fs::path java_out = fs::absolute(bin_dir / "classes" / "java_classes");
     fs::path dex_cache = fs::absolute(bin_dir / "dex_cache");
     fs::path gen_src = fs::absolute(bin_dir / "gen"); 
@@ -115,41 +110,34 @@ std::pair<fs::path, fs::path> compile_source_logic(
     cleanup_stale_assets(deleted_files, java_out, dex_cache);
 
     // --- PHASE 0: EXTRACT KOTLIN STANDARD LIBRARY ---
-    // Extract standard library archive payload into target .class directory structure
     if (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty()) {
         const char* prefix_env = std::getenv("PREFIX");
         fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
         fs::path stdlib_jar = kotlin_lib_root / "kotlin-stdlib.jar";
 
         if (fs::exists(stdlib_jar)) {
-            // Check if kotlin package signature files exist locally inside java_out to avoid redundant extraction loops
             if (!fs::exists(java_out / "kotlin/Unit.class")) {
                 UI::stage("Kotlin stdlib", "Unpacking runtime classes payload into destination layout");
                 
-                // Using zip utility mapping to extract stdlib content directly into our classes cache output directory
                 std::vector<std::string> unzip_args = {
                     "unzip", "-q", "-o", 
                     stdlib_jar.string(), 
                     "-d", java_out.string()
                 };
                 
-                try {
-                    run(unzip_args, "Failed to extract Kotlin standard library elements.");
-                    
-                    // Cleanup archive-specific meta files that break compilation pipelines
+                auto unzip_res = run(unzip_args, "Failed to extract Kotlin standard library elements.");
+                if (unzip_res.is_ok()) {
                     fs::remove_all(java_out / "META-INF");
-                } catch (const std::exception& e) {
-                    UI::warn(std::string("Stdlib unpack notice: ") + e.what());
+                } else {
+                    UI::warn("Stdlib unpack notice: " + unzip_res.get_error());
                 }
             }
         } else {
-            UI::error("Kotlin runtime validation failure: Standard library jar not located inside prefix location", stdlib_jar.string());
+            UI::warn("Kotlin runtime validation failure: Standard library jar not located inside prefix location");
         }
     }
 
     // --- PHASE 1: PRE-COLLECT ALL JAVA REFERENCE STUBS ---
-    // We aggregate regular Java source changes alongside generated layout references (R.java)
-    // upfront so that Kotlin's AST analyzer can accurately reconcile cross-language calls.
     std::vector<fs::path> unified_java_sources;
     if (changed_files.find("java") != changed_files.end()) {
         unified_java_sources = changed_files["java"];
@@ -167,35 +155,47 @@ std::pair<fs::path, fs::path> compile_source_logic(
         }
     }
 
-    // Sync back the completely aggregated vector list into our shared mapping table
     changed_files["java"] = unified_java_sources;
 
     // --- PHASE 2: JOINT KOTLIN COMPILATION STEP ---
-    // Feed BOTH Kotlin paths and Java file signatures directly into kotlinc.
     if (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty()) {
         std::string compose_plug = config.compose_plugin;
         std::vector<fs::path> joint_sources = changed_files["kotlin"];
         joint_sources.insert(joint_sources.end(), unified_java_sources.begin(), unified_java_sources.end());
 
         UI::stage(UI::Msg::KOTLIN_STAGE, "Joint analysis mapping active");
-        compile_incremental_kotlin(
+        
+        // EXPLICITLY PASS THE CLASSPATH STRINGS HERE
+        auto kot_res = compile_incremental_kotlin(
             tools["kotlinc"],
             fs::absolute(android_jar),
             java_out,
-            joint_sources, // Optimized joint-sources vector structure
+            joint_sources,
             run,
             compose_plug
         );
+        if (kot_res.is_err()) {
+            return Result<std::pair<fs::path, fs::path>>::error(kot_res.get_error());
+        }
     }
 
     // --- PHASE 3: CORE JVM JAVA BYTECODE GENERATION ---
-    // Run default Java compilation securely via the daemon channels to finalize actual bytecode generation.
     if (changed_files.find("java") != changed_files.end() && !changed_files["java"].empty()) {
         std::string java_ver = config.java_version;
         if (java_ver.empty()) java_ver = "17";
         
         UI::stage(UI::Msg::JAVA_STAGE, std::to_string(changed_files["java"].size()) + " files total");
-        compile_incremental_java(java_ver, {}, fs::absolute(android_jar), fs::absolute(java_out), changed_files["java"], run);
+        auto java_res = compile_incremental_java(
+            java_ver, 
+            {}, 
+            fs::absolute(android_jar), 
+            fs::absolute(java_out), 
+            changed_files["java"], 
+            run
+        );
+        if (java_res.is_err()) {
+            return Result<std::pair<fs::path, fs::path>>::error(java_res.get_error());
+        }
     }
 
     // --- PHASE 4: EXTENSIBLE DYNAMIC PLUGIN PIPELINE ---
@@ -206,14 +206,12 @@ std::pair<fs::path, fs::path> compile_source_logic(
 
         auto change_entry = changed_files.find(plugin.name);
         if (change_entry != changed_files.end() && !change_entry->second.empty()) {
-            execute_plugin_compiler(plugin, change_entry->second, java_out, bin_dir, android_jar, run);
+            auto plug_res = execute_plugin_compiler(plugin, change_entry->second, java_out, bin_dir, android_jar, run);
+            if (plug_res.is_err()) {
+                return Result<std::pair<fs::path, fs::path>>::error(plug_res.get_error());
+            }
         }
     }
 
-    // --- PHASE 5: NATIVE ENGINES VERIFICATION PASS ---
-    if (changed_files.find("native") != changed_files.end() && !changed_files["native"].empty()) {
-        UI::info("Found pending updates for localized C/C++ core modules.");
-    }
-
-    return {java_out, dex_cache};
+    return Result<std::pair<fs::path, fs::path>>::success({java_out, dex_cache});
 }
