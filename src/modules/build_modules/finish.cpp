@@ -44,39 +44,7 @@ std::string trim_token(const std::string& str) {
     return str.substr(first, (last - first + 1));
 }
 
-/**
- * ============================================================================
- * SECTION 1: SYSTEM SHARED LIBRARY AUTO-PLACEMENT ENGINE
- * ============================================================================
- */
-
-/**
- * Parses out individual library tokens from the SYSTEM_SHARED_LIBS array inside config.json text.
- */
-std::vector<std::string> parse_configured_libraries(const std::string& config_content) {
-    std::vector<std::string> libs;
-    size_t array_start = config_content.find("\"SYSTEM_SHARED_LIBS\":");
-    if (array_start == std::string::npos) return libs;
-
-    size_t start_bracket = config_content.find("[", array_start);
-    size_t end_bracket = config_content.find("]", start_bracket);
-    if (start_bracket == std::string::npos || end_bracket == std::string::npos) return libs;
-
-    std::string array_body = config_content.substr(start_bracket + 1, end_bracket - start_bracket - 1);
-    
-    size_t pos = 0;
-    while ((pos = array_body.find("\"", pos)) != std::string::npos) {
-        size_t next_quote = array_body.find("\"", pos + 1);
-        if (next_quote == std::string::npos) break;
-        
-        std::string lib_name = array_body.substr(pos + 1, next_quote - pos - 1);
-        if (!lib_name.empty()) {
-            libs.push_back(lib_name);
-        }
-        pos = next_quote + 1;
-    }
-    return libs;
-}
+// SECTION 1: SYSTEM SHARED LIBRARY AUTO-PLACEMENT
 
 /**
  * Automatically fetches configured .so libraries from Termux's localized 
@@ -178,11 +146,8 @@ void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_
     }
 }
 
-/**
- * ============================================================================
- * SECTION 2: APK ASSEMBLY, ALIGNMENT, AND SIGNING STAGES
- * ============================================================================
- */
+ // SECTION 2: APK ASSEMBLY, ALIGNMENT, AND SIGNING STAGES
+ 
 
 // Injects classes.dex, assets, and ONLY the requested native libraries for this package task.
 Result<void> inject_assets_and_dex(

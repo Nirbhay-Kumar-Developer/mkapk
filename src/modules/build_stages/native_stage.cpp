@@ -13,7 +13,7 @@ Result<void> NativeStage::execute(const MkapkConfig& config, PipelineContext& ct
                        config.target_sdk, 
                        ctx.run_func, 
                        ctx.diff.changed_files["native"], 
-                       config.native_targets);
+                       config);
     }
     
     if (!config.system_shared_libs.empty() || !ctx.diff.changed_files["native"].empty() || ctx.force_all) {

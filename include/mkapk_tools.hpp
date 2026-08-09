@@ -109,7 +109,7 @@ bool compile_native(
     const std::string& target_api,
     RunFunc run_func,
     const std::vector<fs::path>& changed_files,
-    const std::vector<NativeTargetConfig>& native_targets
+    const MkapkConfig& config
 );
 
 // Dexing

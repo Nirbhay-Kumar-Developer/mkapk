@@ -225,39 +225,7 @@ namespace MkapkEnv {
         return full_cp;
     }
     
-    std::vector<NativeTargetConfig> parse_json_native_targets(const std::string& config_content) {
-        std::vector<NativeTargetConfig> targets;
-        try {
-            json j = json::parse(config_content);
-            
-            if (j.contains("NATIVE_TARGETS") && j["NATIVE_TARGETS"].is_array()) {
-                for (const auto& item : j["NATIVE_TARGETS"]) {
-                    NativeTargetConfig cfg;
-                    
-                    if (item.contains("NAME") && item["NAME"].is_string()) {
-                        cfg.name = item["NAME"].get<std::string>();
-                    }
-                    
-                    if (item.contains("SOURCES") && item["SOURCES"].is_array()) {
-                        for (const auto& src : item["SOURCES"]) {
-                            if (src.is_string()) cfg.sources.push_back(src.get<std::string>());
-                        }
-                    }
-                    
-                    if (item.contains("EXTRA_FLAGS") && item["EXTRA_FLAGS"].is_array()) {
-                        for (const auto& flag : item["EXTRA_FLAGS"]) {
-                            if (flag.is_string()) cfg.extra_flags.push_back(flag.get<std::string>());
-                        }
-                    }
-                    
-                    targets.push_back(cfg);
-                }
-            }
-        } catch (const json::parse_error& e) {
-            UI::error("JSON Structural compilation parsing check failed inside NATIVE_TARGETS definition blocks.", e.what());
-        }
-        return targets;
-    }
+    // Removed redundant NATIVE_TARGETS psrsing
 
     bool init_project() {
         

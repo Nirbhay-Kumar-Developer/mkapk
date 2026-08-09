@@ -38,9 +38,9 @@ bool compile_native(
     const std::string& target_api,
     RunFunc run_func,
     const std::vector<fs::path>& changed_files,
-    const std::vector<NativeTargetConfig>& native_targets) 
+    const MkapkConfig& config) 
 {
-    if (native_targets.empty()) {
+    if (config.native_targets.empty()) {
         std::lock_guard<std::mutex> lock(console_mutex);
         std::cout << ">> [NATIVE] No native compile targets specified. Skipping." << std::endl;
         return false;
@@ -64,7 +64,7 @@ bool compile_native(
     std::vector<std::future<void>> compile_workers;
 
     // --- LAUNCH TARGET-AND-ARCHITECTURE COMPILATION MATRIX IN PARALLEL ---
-    for (const auto& target : native_targets) {
+    for (const auto& target : config.native_targets) {
         
         // Filter down target sources to compute what needs an active build pass
         std::vector<fs::path> target_files_to_compile;
