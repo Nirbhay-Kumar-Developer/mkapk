@@ -24,35 +24,60 @@ struct LanguagePlugin {
     bool is_verified = false;          
 };
 
+// Structural and actionable build flags
 struct BuildResults {
-    bool mode_switched = false;
-    bool src_changed = false;
-    bool res_changed = false;
-    bool manifest_changed = false;
+    // Stage Booleans
+    bool mode_switched                = false;
+    bool src_changed                  = false;
+    bool res_changed                  = false;
+    bool manifest_changed             = false;
+    bool assets_changed               = false;
+    bool proguard_changed             = false;
+    bool andresguard_changed          = false;
+    bool r_txt_changed                = false;
+
+    // Action Directives
+    bool needs_manifest_relink        = false; 
+    bool needs_jvm_compile            = false;
+    bool needs_repackage              = false; 
+    bool needs_dex_rebuild            = false; 
+    bool needs_resource_obfuscation   = false; 
     
+    // File tracking
     std::map<std::string, std::vector<fs::path>> changed_files;
     std::map<std::string, std::vector<fs::path>> deleted_files;
     std::vector<fs::path> changed_resources;
+    std::vector<fs::path> changed_assets;
 
     bool any_changes() const {
-        if (src_changed || res_changed || manifest_changed || mode_switched) {
-            return true;
-        }
-        for (const auto& [lang, files] : changed_files) {
-            if (!files.empty()) return true;
-        }
-        return false;
+        return src_changed || res_changed || manifest_changed || 
+               assets_changed || proguard_changed || andresguard_changed || 
+               r_txt_changed || mode_switched || needs_manifest_relink || 
+               needs_jvm_compile || needs_repackage || 
+               needs_dex_rebuild || needs_resource_obfuscation;
     }
 };
 
-std::string get_file_hash(const fs::path& file_path);
-std::map<std::string, std::string> scan_directory(const fs::path& dir_path);
+// Abstract change detection interface
+class IChangeChecker {
+public:
+    virtual ~IChangeChecker() = default;
+    virtual std::pair<BuildResults, std::map<std::string, std::string>> detect_changes(
+        const fs::path& build_dir,
+        const MkapkConfig& config,
+        bool force_all,
+        bool is_release
+    ) = 0;
+};
 
+std::string get_file_hash(const fs::path& file_path);
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
     const fs::path& bin_dir, 
-    const std::string& config_content, 
-    bool force_all
+    const MkapkConfig& config, 
+    bool force_all,
+    bool is_release
 );
+void save_state(const fs::path& build_dir, const std::map<std::string, std::string>& next_state, bool is_release);
 
 // JVM Stage
 Result<void> compile_incremental_java(
@@ -70,7 +95,8 @@ Result<void> compile_incremental_kotlin(
     const fs::path& classes_dir,
     const std::vector<fs::path>& changed_files,
     RunFunc run_func,
-    const std::string& compose_plugin = ""
+    const std::string& compose_plugin = "",
+    bool is_release = false
 );
 
 // Resources
