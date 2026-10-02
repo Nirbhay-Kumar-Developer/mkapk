@@ -3,3 +3,7 @@ bundle.sh
 bundle.cpp
 test/,
 compile_commands.json
+.cache/
+diff.cpp
+to-do.txt
+test/
