@@ -18,27 +18,66 @@ namespace UI {
     const std::string CYAN        = "\033[36m";
     const std::string WHITE       = "\033[37m";
 
-    // 2. CENTRALIZED STRING REGISTRY (Change strings here to update the whole app)
+    // 2. CENTRALIZED STRING & MESSAGE REGISTRY
     namespace Msg {
-        // Build Lifecycle
-        const std::string BUILD_START      = "Starting operational build pipeline";
-        const std::string BUILD_SUCCESS    = "mkapk: Build finished successfully.";
-        const std::string BUILD_UP_TO_DATE = "Project is already up-to-date.";
-        const std::string CLEAN_START      = "Cleaning 'bin/' directory (preserving keystores)...";
-        const std::string CLEAN_SUCCESS    = "Clean finished successfully.";
+        // Lifecycle & Core Status
+        const std::string BUILD_START          = "Starting mkapk build";
+        const std::string BUILD_SUCCESS        = "mkapk: Build finished successfully.";
+        const std::string BUILD_UP_TO_DATE     = "Project is already up-to-date.";
+        const std::string CLEAN_START          = "Cleaning build cache directories";
+        const std::string CLEAN_SUCCESS        = "Clean finished successfully.";
+        const std::string ARTIFACT_LOC         = "Artifact Location: ";
         
-        // Modules
-        const std::string RES_STAGE        = "[RES] Linking Manifest & Resources";
-        const std::string JAVA_STAGE       = "[JAVA] Compiling Java source files";
-        const std::string KOTLIN_STAGE     = "[KOTLIN] Compiling Kotlin source files";
-        const std::string NATIVE_STAGE     = "[NATIVE] Processing Native ABI compilation matrix";
-        const std::string PACK_STAGE       = "[PACK] Assembling variant target container";
-        const std::string SIGN_STAGE       = "[SIGN] Signing production APK packages";
+        // Mode Subtitles
+        const std::string MODE_RELEASE         = "Release Mode";
+        const std::string MODE_DEBUG           = "Debug Mode";
+        const std::string MULTI_ABI            = "Multi-ABI Output";
+        const std::string ABI_PREFIX           = "ABI: ";
+
+        // Pipeline Stages
+        const std::string STAGE_RES            = "Processing Resources";
+        const std::string STAGE_RES_LINK       = "Linking Resources";
+        const std::string STAGE_SOURCE         = "Processing Source code";
+        const std::string STAGE_JAVA           = "Java Compiler";
+        const std::string STAGE_KOTLIN         = "Kotlin Compiler";
+        const std::string STAGE_NATIVE         = "Native Compiler";
+        const std::string STAGE_PACK           = "Packaging";
+        const std::string STAGE_SIGN           = "Apk Signer";
+        const std::string STAGE_ALIGN          = "Alignment";
+        const std::string STAGE_OBFUSCATE      = "Resource Obfuscation";
+        const std::string STAGE_DEX            = "Dexing";
+        const std::string STAGE_MINIFY         = "Minification";
+        const std::string STAGE_NDK_LIBS       = "NDK Dependencies";
+        const std::string STAGE_INIT           = "Initialization";
         
-        // Daemon & Errors
-        const std::string DAEMON_FAIL      = "Daemon Error: Handshake failed or JVM process died.";
-        const std::string CONFIG_MISSING   = "Configuration file 'config.json' not found. Run 'mkapk init'.";
-        const std::string FATAL_INTERNAL   = "A fatal internal compilation error occurred.";
+        // Stage Subtitles & Operations
+        const std::string OP_COMPILE_RES       = "Compiling resources";
+        const std::string OP_COMPILING_JVM     = "Compiling Java/Kotlin source files";
+        const std::string OP_COMPILING_NATIVE  = "Compiling native source code";
+        const std::string OP_RESOLVING_LIBS    = "Auto-resolving native dependencies";
+        const std::string OP_PREPARING_APK     = "Preparing and assembling APK archive";
+        const std::string OP_OBFUSCATING       = "Obfuscating resources";
+        const std::string OP_ALIGNING          = "Aligning apk";
+        const std::string OP_SIGNING           = "Signing apk";
+        const std::string OP_R8_OPTIMIZE       = "Dexing and optimizing bytecode";
+        const std::string OP_CC_COMPILE        = "Compiling native code";
+        const std::string OP_LD_LINK           = "Linking shared object libraries";
+        const std::string OP_LIB_AUTOPLACED    = "Added library: ";
+        
+        // Notices & Warnings
+        const std::string WARN_CONTAINER_OK    = "Packaged artifacts are up-to-date.";
+        const std::string WARN_RESGUARD_MISS   = "AndResGuard tool or configuration XML missing. Skipping obfuscation.";
+        const std::string WARN_RESGUARD_FAIL   = "AndResGuard execution failed.";
+        const std::string WARN_STRIP_FAIL      = "Binary code striping failed.";
+        const std::string WARN_KEYSTORE_FAIL   = "Automated debug keystore generation failed.";
+
+        // Fatal & Error Strings
+        const std::string DAEMON_FAIL          = "Daemon Error: Handshake failed or JVM process died.";
+        const std::string CONFIG_MISSING       = "Configuration file 'config.json' not found. Run 'mkapk init'.";
+        const std::string FATAL_INTERNAL       = "A fatal internal compilation error occurred.";
+        const std::string ERR_MANIFEST_MISSING = "Cannot link resources without a valid AndroidManifest.xml.";
+        const std::string ERR_SDK_MISSING      = "Android SDK android.jar dependency could not be resolved.";
+        const std::string ERR_KEYSTORE_MISSING = "Keystore is missing.";
     }
 
     // ============================================================================
@@ -48,12 +87,11 @@ namespace UI {
     public:
         virtual ~ILogger() = default;
         virtual void info(const std::string& message) = 0;
+        virtual void raw(const std::string& message) = 0;
         virtual void stage(const std::string& stage_name, const std::string& details = "") = 0;
         virtual void success(const std::string& message, const std::string& prefix = "✨ ") = 0;
         virtual void warn(const std::string& message) = 0;
         virtual void error(const std::string& message, const std::string& details = "") = 0;
-        
-        // Required for legacy stream injections (e.g., direct std::cerr manipulation)
         virtual std::mutex& get_console_mutex() = 0; 
     };
 
@@ -62,38 +100,47 @@ namespace UI {
     // ============================================================================
     class ConsoleLogger : public ILogger {
     private:
-        // Mutex is now safely bound to the object instance, preventing SIOF crashes.
         std::mutex console_mutex;
 
     public:
         void info(const std::string& message) override {
             std::lock_guard<std::mutex> lock(console_mutex);
-            std::cout << CYAN << "• " << RESET << message << std::endl;
+            std::cout << CYAN << "• " << RESET << message << '\n';
+            std::cout.flush();
+        }
+
+        void raw(const std::string& message) override {
+            std::cout << message << '\n';
+            std::cout.flush();
         }
 
         void stage(const std::string& stage_name, const std::string& details = "") override {
             std::lock_guard<std::mutex> lock(console_mutex);
             std::cout << BLUE << "» " << RESET << BOLD << stage_name << RESET;
             if (!details.empty()) std::cout << " (" << details << ")";
-            std::cout << "..." << std::endl;
+            std::cout << "...\n";
+            std::cout.flush();
         }
 
         void success(const std::string& message, const std::string& prefix = "✨ ") override {
             std::lock_guard<std::mutex> lock(console_mutex);
-            std::cout << GREEN << prefix << BOLD << message << RESET << std::endl;
+            std::cout << GREEN << prefix << BOLD << message << RESET << '\n';
+            std::cout.flush();
         }
 
         void warn(const std::string& message) override {
             std::lock_guard<std::mutex> lock(console_mutex);
-            std::clog << YELLOW << "⚠️  Warning: " << RESET << message << std::endl;
+            std::clog << YELLOW << "⚠️  Warning: " << RESET << message << '\n';
+            std::clog.flush();
         }
 
         void error(const std::string& message, const std::string& details = "") override {
             std::lock_guard<std::mutex> lock(console_mutex);
-            std::cerr << RED << "✘ Error: " << RESET << BOLD << message << RESET << std::endl;
+            std::cerr << RED << "✘ Error: " << RESET << BOLD << message << RESET << '\n';
             if (!details.empty()) {
-                std::cerr << RED << "  Details: " << RESET << details << std::endl;
+                std::cerr << RED << "  Details: " << RESET << details << '\n';
             }
+            std::cerr.flush();
         }
 
         std::mutex& get_console_mutex() override {
@@ -102,24 +149,21 @@ namespace UI {
     };
 
     // ============================================================================
-    // 5. LOGGER MANAGER (Service Locator / Singleton)
+    // 5. LOGGER MANAGER (Service Locator / Mayer's Singleton)
     // ============================================================================
     class LoggerManager {
     private:
         ILogger* active_logger;
         ConsoleLogger default_logger;
 
-        // Private constructor initializes with standard console output safely
         LoggerManager() : active_logger(&default_logger) {}
 
     public:
-        // Mayer's Singleton: Thread-safe and guarantees safe initialization order
         static LoggerManager& get() {
             static LoggerManager instance;
             return instance;
         }
 
-        // Allows you to dynamically swap the logger to a GUI or File logger later
         void set_logger(ILogger* new_logger) {
             if (new_logger) active_logger = new_logger;
         }
@@ -130,17 +174,18 @@ namespace UI {
     };
 
     // ============================================================================
-    // 6. BACKWARD COMPATIBILITY FORWARDERS
+    // 6. GLOBAL ROUTING FORWARDERS
     // ============================================================================
-    // These inline functions bridge all existing UI:: calls in the codebase 
-    // seamlessly to the actively managed logger.
-
     inline std::mutex& get_console_mutex() {
         return LoggerManager::get().logger().get_console_mutex();
     }
 
     inline void info(const std::string& message) {
         LoggerManager::get().logger().info(message);
+    }
+
+    inline void raw(const std::string& message) {
+        LoggerManager::get().logger().raw(message);
     }
 
     inline void stage(const std::string& stage_name, const std::string& details = "") {
@@ -160,4 +205,4 @@ namespace UI {
     }
 }
 
-#endif
+#endif // MKAPK_UI_HPP

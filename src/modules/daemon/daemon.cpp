@@ -314,6 +314,7 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
                             g_last_daemon_output.push_back("[WARN]|" + message);
                             daemon_logger.process_stdout_line("[WARN]|" + message, args[0]);
                         } else {
+                            // Only route to sanitizer if it contains meaningful data
                             g_last_daemon_output.push_back(message);
                             daemon_logger.process_stdout_line(message, args[0]);
                         }

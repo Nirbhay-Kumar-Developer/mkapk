@@ -104,7 +104,7 @@ void show_help() {
 bool clean_build_directory(bool target_release, bool target_debug) {
     size_t deleted_count = 0;
     
-    // If no flags are passed explicitly, clean both by default for safety
+    // If no flags are passed explicitly, clean both by default
     if (!target_release && !target_debug) {
         target_release = true;
         target_debug = true;
@@ -115,17 +115,17 @@ bool clean_build_directory(bool target_release, bool target_debug) {
             if (fs::is_directory(target)) {
                 try {
                     deleted_count += fs::remove_all(target);
-                    UI::success("Cleaned target workspace tree segment: " + target.string());
-                } catch (const fs::filesystem_error& e) {
-                    UI::error("Filesystem sweep error targeting: " + target.string(), e.what());
+                    UI::success("Cleaned: " + target.string());
+                } catch (const fs::filesystem_error&) {
+                    UI::error("Failed to clean " + target.string() + ". Please try again or contact the maintainer.");
                 }
             } else {
-                UI::error("Target path mismatch (not a directory): " + target.string());
+                UI::error("Failed to clean " + target.string() + " (not a directory). Please try again or contact the maintainer.");
             }
         }
     };
 
-    UI::info("Starting targeted operational workspace cleanup pipeline...");
+    UI::info("Cleaning build directories...");
     
     if (target_debug) {
         clear_path(fs::absolute("build/debug"));
@@ -134,15 +134,19 @@ bool clean_build_directory(bool target_release, bool target_debug) {
         clear_path(fs::absolute("build/release"));
     }
 
-    UI::success("Wipe operation finished. Removed " + std::to_string(deleted_count) + " layout item(s).");
+    UI::success("Cleanup complete. Removed " + std::to_string(deleted_count) + " item(s).");
     return true;
 }
 
 int main(int argc, char* argv[]) {
+    // Disable full block buffering so terminal streams in real time
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+
     std::streambuf* old_cerr_buf = std::cerr.rdbuf();
     JavaWarningFilterBuf filter_buf(old_cerr_buf);
     std::cerr.rdbuf(&filter_buf);
-
+    
     std::vector<std::string> args(argv + 1, argv + argc);
 
     if (args.empty() || args[0] == "help" || args[0] == "--help") {
@@ -171,7 +175,7 @@ int main(int argc, char* argv[]) {
 
         if (command == "install") {
             if (args.size() < 2) {
-                UI::error("Missing target package path token. Usage: mkapk install <plugin.pl>");
+                UI::error("Missing target package path. Usage: mkapk install <plugin.pl>");
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
@@ -182,7 +186,7 @@ int main(int argc, char* argv[]) {
 
         if (command == "uninstall") {
             if (args.size() < 2) {
-                UI::error("Missing target language handle name. Usage: mkapk uninstall <plugin_name>");
+                UI::error("Missing target plugin name. Usage: mkapk uninstall <plugin_name>");
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
@@ -241,7 +245,7 @@ int main(int argc, char* argv[]) {
             } 
             catch (const std::exception& build_err) {
                 stop_daemon();
-                UI::error("Build pipeline run interrupted.", build_err.what());
+                UI::error("Build interrupted.", build_err.what());
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1; 
             } 
@@ -253,13 +257,13 @@ int main(int argc, char* argv[]) {
             }
         } 
         else {
-            UI::error("Unknown execution instruction command sequence: '" + command + "'. Use 'mkapk help'.");
+            UI::error("Unknown command: '" + command + "'. Use 'mkapk help' to get a list of supported commands.");
             std::cerr.rdbuf(old_cerr_buf);
             return 1;
         }
     } 
     catch (const std::exception& e) {
-        UI::error("Fatal system failure boundary level broken.", e.what());
+        UI::error("Fatal Error", e.what());
         std::cerr.rdbuf(old_cerr_buf);
         return 1;
     }

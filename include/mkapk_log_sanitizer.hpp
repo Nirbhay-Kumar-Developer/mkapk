@@ -9,8 +9,8 @@ private:
     int sequence_state = 0;
     std::vector<std::string> buffered_err_lines;
     bool in_error_block = false;
+    bool in_proguard_info_block = false; // Generic multi-line state tracker
 
-    // The deprecation warning sequence we want to silently drop
     const std::vector<std::string> TARGET_SEQUENCE = {
         "WARNING: A terminally deprecated method in java.lang.System has been called",
         "WARNING: System::setSecurityManager has been called by com.mkapk.tools.MkapkTools (file:/data/data/com.termux/files/usr/share/mkapk/mkapk-coordinator.jar)",
