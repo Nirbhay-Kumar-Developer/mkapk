@@ -48,8 +48,7 @@ Result<void> compile_incremental_java(
 
     std::vector<std::string> args = {
         "javac",
-        "-source", version,
-        "-target", version,
+        "--release", version,
         "-encoding", "UTF-8",
         "-classpath", cp_str,
         "-d", fs::absolute(out_dir).string(),

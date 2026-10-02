@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 #include <functional>
 #include "mkapk_helpers.hpp"
@@ -13,23 +14,17 @@ namespace fs = std::filesystem;
 using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 /**
- * Utility to collect all .class files.
-  */
+ * Utility to collect all compiled .class files.
+ */
 std::vector<std::string> get_all_class_files(const fs::path& bin_dir) {
     fs::path resolved_bin = fs::absolute(bin_dir);
-    
-    // Scans both destination directories generated during joint compilation
-    std::vector<fs::path> class_dirs = {
-        resolved_bin / "classes" / "java_classes"
-    };
+    fs::path class_dir = resolved_bin / "classes" / "java_classes";
 
     std::vector<std::string> all_files;
-    for (const auto& c_dir : class_dirs) {
-        if (fs::exists(c_dir)) {
-            for (const auto& entry : fs::recursive_directory_iterator(c_dir)) {
-                if (entry.is_regular_file() && entry.path().extension() == ".class") {
-                    all_files.push_back(fs::absolute(entry.path()).string());
-                }
+    if (fs::exists(class_dir)) {
+        for (const auto& entry : fs::recursive_directory_iterator(class_dir)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".class") {
+                all_files.push_back(fs::absolute(entry.path()).string());
             }
         }
     }
@@ -37,16 +32,17 @@ std::vector<std::string> get_all_class_files(const fs::path& bin_dir) {
 }
 
 /**
- * Converts .class files to .dex incrementally.
- * Processed here inside dex.cpp to isolate D8 interactions.
+ * Converts .class files to .dex incrementally using D8 with Java 8+ desugaring.
  */
-Result<void> run_incremental_dex(const std::string& D8,
-                         const fs::path& android_jar,
-                         const fs::path& src_path,
-                         const fs::path& java_out,
-                         const fs::path& dex_cache,
-                         const std::vector<fs::path>& files_to_dex,
-                         RunFunc run) {
+Result<void> run_incremental_dex(
+    const std::string& D8,
+    const fs::path& android_jar,
+    const fs::path& src_path,
+    const fs::path& java_out,
+    const fs::path& dex_cache,
+    const std::vector<fs::path>& files_to_dex,
+    RunFunc run) 
+{
     if (files_to_dex.empty()) return Result<void>::success();
 
     for (const auto& src_file : files_to_dex) {
@@ -58,7 +54,8 @@ Result<void> run_incremental_dex(const std::string& D8,
         if (fs::exists(class_dir)) {
             for (const auto& entry : fs::directory_iterator(class_dir)) {
                 std::string filename = entry.path().filename().string();
-                if (filename == base_name + ".class" || filename.find(base_name + "$") == 0) {
+                // Exact matching for base class and its inner classes
+                if (filename == base_name + ".class" || filename.rfind(base_name + "$", 0) == 0) {
                     family_classes.push_back(fs::absolute(entry.path()).string());
                 }
             }
@@ -70,12 +67,15 @@ Result<void> run_incremental_dex(const std::string& D8,
 
             std::vector<std::string> d8_args = {
                 "d8", 
+                "--min-api", "21", // Automates Java 8+ language desugaring
                 "--lib", fs::absolute(android_jar).string(),
                 "--classpath", fs::absolute(java_out).string(),
                 "--output", fs::absolute(target_dex_dir).string()
             };
             
-            for (const auto& cls : family_classes) d8_args.push_back(cls);
+            for (const auto& cls : family_classes) {
+                d8_args.push_back(cls);
+            }
 
             auto res = run(d8_args, "Incremental D8 failed for: " + base_name);
             if (res.is_err()) return res;
@@ -91,7 +91,11 @@ Result<void> run_incremental_dex(const std::string& D8,
 }
 
 /**
- * (Step iv) Converts .class files using R8.
+ * Optimizes and shrinks bytecode for release using R8:
+ * - Employs Whole-Program Tree Shaking & Inlining
+ * - Automates keep-rules generation by merging AAPT2 and user rules
+ * - Exports mapping.txt for de-obfuscation
+ * - Uses Arg-Files to prevent E2BIG overflow on large codebases
  */
 Result<void> run_dex_r8(
     const std::string& R8_TOOL,
@@ -101,16 +105,13 @@ Result<void> run_dex_r8(
     RunFunc run_func,
     bool no_obs)
 {
-    std::cout << ">> [R8] Optimizing for release (Obfuscation: " << (no_obs ? "false" : "true") << ")..." << std::endl;
-
     fs::path bin_dir_path = fs::absolute(bin_dir);
     std::vector<std::string> class_files = get_all_class_files(bin_dir_path);
 
     if (class_files.empty()) {
-        return Result<void>::error("No class files found for R8. Check compiler output.");
+        return Result<void>::error(UI::Msg::FATAL_INTERNAL);
     }
 
-    // --- SOLUTION 3: RESOLVE JETBRAINS ANNOTATIONS PATH ---
     const char* prefix_env = std::getenv("PREFIX");
     fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
     fs::path annotations_jar = kotlin_lib_root / "annotations-13.0.jar"; 
@@ -118,25 +119,27 @@ Result<void> run_dex_r8(
     std::vector<std::string> args = {
         R8_TOOL,
         "--release",
-        "--lib", fs::absolute(android_jar).string()
+        "--min-api", "21", // Automates Java 8+ language feature desugaring
+        "--lib", fs::absolute(android_jar).string(),
+        "--output", bin_dir_path.string()
     };
 
-    // If the companion annotations archive payload exists, append it as a reference graph library
     if (fs::exists(annotations_jar)) {
         args.push_back("--lib");
         args.push_back(fs::absolute(annotations_jar).string());
-    } else {
-        std::cerr << "!! Warning: JetBrains annotations jar not found at: " << annotations_jar << std::endl;
     }
 
-    // Continue with the remaining standard R8 args setup
-    args.push_back("--output");
-    args.push_back(bin_dir_path.string());
-
     if (!no_obs) {
-        std::string pg_rules_raw = config.proguard_rules;
-        if (!pg_rules_raw.empty()) {
-            fs::path pg_rules = fs::absolute(MkapkEnv::resolve_path(pg_rules_raw));
+        // 1. AAPT2-Generated Keep Rules (Manifest components, XML layouts, custom views)
+        fs::path aapt_rules = bin_dir_path / "aapt_rules.pro";
+        if (fs::exists(aapt_rules)) {
+            args.push_back("--pg-conf");
+            args.push_back(aapt_rules.string());
+        }
+
+        // 2. User-Defined ProGuard Rules
+        if (!config.proguard_rules.empty()) {
+            fs::path pg_rules = fs::absolute(MkapkEnv::resolve_path(config.proguard_rules));
             if (fs::exists(pg_rules)) {
                 args.push_back("--pg-conf");
                 args.push_back(pg_rules.string());
@@ -144,10 +147,27 @@ Result<void> run_dex_r8(
                 std::cout << "!! Warning: ProGuard rules not found at " << pg_rules << std::endl;
             }
         }
+
+        // 3. Automated Obfuscation Symbol Map Export
+        fs::path mapping_file = bin_dir_path / "mapping.txt";
+        args.push_back("--pg-map-output");
+        args.push_back(mapping_file.string());
     }
 
-    for (const auto& file : class_files) {
-        args.push_back(file);
+    // 4. Batch class files into an arg-file to prevent CLI argument length limits
+    fs::path input_list_file = bin_dir_path / "r8_inputs.txt";
+    std::ofstream input_file(input_list_file);
+    if (input_file.is_open()) {
+        for (const auto& file : class_files) {
+            input_file << file << "\n";
+        }
+        input_file.close();
+        args.push_back("@" + input_list_file.string());
+    } else {
+        // Fallback to inline args if file write fails
+        for (const auto& file : class_files) {
+            args.push_back(file);
+        }
     }
 
     auto res = run_func(args, "R8 optimization failed");
@@ -157,7 +177,7 @@ Result<void> run_dex_r8(
 }
 
 /**
- * (Step iv Alternate) Merges incrementally dexed files using D8.
+ * Merges cached incremental DEX files or raw class files using D8.
  */
 Result<void> run_dex_d8(
     const std::string& D8_TOOL,
@@ -166,12 +186,10 @@ Result<void> run_dex_d8(
     const fs::path& dex_cache,
     RunFunc run_func) 
 {
-    std::cout << ">> [DEX] Merging with D8..." << std::endl;
-
     fs::path bin_dir_path = fs::absolute(bin_dir);
     std::vector<std::string> inputs;
 
-    // 1. First, check if incremental .dex files exist in dex_cache
+    // 1. Gather all cached incremental .dex files
     if (fs::exists(dex_cache)) {
         for (const auto& entry : fs::recursive_directory_iterator(dex_cache)) {
             if (entry.is_regular_file() && entry.path().extension() == ".dex") {
@@ -180,9 +198,8 @@ Result<void> run_dex_d8(
         }
     }
 
-    // 2. Fallback: If no .dex files exist, gather all compiled .class files directly
+    // 2. Fallback: If cache is empty, gather all compiled .class files
     if (inputs.empty()) {
-        std::cout << ">> [DEX] No cached .dex files found. Fallback to compiling .class files..." << std::endl;
         inputs = get_all_class_files(bin_dir_path);
     }
 
@@ -192,12 +209,24 @@ Result<void> run_dex_d8(
 
     std::vector<std::string> args = {
         D8_TOOL,
+        "--min-api", "21", // Automates Java 8+ language feature desugaring
         "--lib", fs::absolute(android_jar).string(),
         "--output", bin_dir_path.string()
     };
 
-    for (const auto& input : inputs) {
-        args.push_back(input);
+    // Prevent ARG_MAX overflow during intermediate DEX merge
+    fs::path merge_list_file = bin_dir_path / "d8_inputs.txt";
+    std::ofstream merge_file(merge_list_file);
+    if (merge_file.is_open()) {
+        for (const auto& input : inputs) {
+            merge_file << input << "\n";
+        }
+        merge_file.close();
+        args.push_back("@" + merge_list_file.string());
+    } else {
+        for (const auto& input : inputs) {
+            args.push_back(input);
+        }
     }
 
     auto res = run_func(args, "D8 merge failed");

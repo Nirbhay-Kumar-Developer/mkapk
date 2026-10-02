@@ -117,7 +117,6 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
 
         if (fs::exists(stdlib_jar)) {
             if (!fs::exists(java_out / "kotlin/Unit.class")) {
-                UI::stage("Kotlin stdlib", "Unpacking runtime classes payload into destination layout");
                 
                 std::vector<std::string> unzip_args = {
                     "unzip", "-q", "-o", 
@@ -157,22 +156,22 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
 
     changed_files["java"] = unified_java_sources;
 
-    // --- PHASE 2: JOINT KOTLIN COMPILATION STEP ---
+            // --- PHASE 2: JOINT KOTLIN COMPILATION STEP ---
     if (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty()) {
         std::string compose_plug = config.compose_plugin;
         std::vector<fs::path> joint_sources = changed_files["kotlin"];
         joint_sources.insert(joint_sources.end(), unified_java_sources.begin(), unified_java_sources.end());
-
-        UI::stage(UI::Msg::KOTLIN_STAGE, "Joint analysis mapping active");
         
-        // EXPLICITLY PASS THE CLASSPATH STRINGS HERE
+        bool is_release = (bin_dir.string().find("release") != std::string::npos);
+
         auto kot_res = compile_incremental_kotlin(
             tools["kotlinc"],
             fs::absolute(android_jar),
             java_out,
             joint_sources,
             run,
-            compose_plug
+            compose_plug,
+            is_release
         );
         if (kot_res.is_err()) {
             return Result<std::pair<fs::path, fs::path>>::error(kot_res.get_error());
@@ -184,7 +183,7 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
         std::string java_ver = config.java_version;
         if (java_ver.empty()) java_ver = "17";
         
-        UI::stage(UI::Msg::JAVA_STAGE, std::to_string(changed_files["java"].size()) + " files total");
+        UI::stage(UI::Msg::STAGE_JAVA, std::to_string(changed_files["java"].size()) + " files");
         auto java_res = compile_incremental_java(
             java_ver, 
             {}, 

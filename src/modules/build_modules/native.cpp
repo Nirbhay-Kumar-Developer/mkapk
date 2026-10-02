@@ -42,7 +42,6 @@ bool compile_native(
 {
     if (config.native_targets.empty()) {
         std::lock_guard<std::mutex> lock(console_mutex);
-        std::cout << ">> [NATIVE] No native compile targets specified. Skipping." << std::endl;
         return false;
     }
 
@@ -119,8 +118,7 @@ bool compile_native(
                     fs::create_directories(obj_file.parent_path());
 
                     {
-                        std::lock_guard<std::mutex> lock(console_mutex);
-                        std::cout << "   [" << apk_lib_dir << " - CC] " << target.name << " <= " << src_file.filename().string() << std::endl;
+                        UI::info("[" + apk_lib_dir + "] " + target.name + " <= " + src_file.filename().string());
                     }
                     
                     std::vector<std::string> cc_args = {
@@ -156,8 +154,7 @@ bool compile_native(
                 if (!obj_list.empty() && (objects_updated || !fs::exists(output_so))) {
                     
                     {
-                        std::lock_guard<std::mutex> lock(console_mutex);
-                        std::cout << "   [" << apk_lib_dir << " - LD] lib" << target.name << ".so" << std::endl;
+                        UI::info("[" + apk_lib_dir + "] Linked lib" + target.name + ".so");
                     }
                     
                     std::vector<std::string> ld_args = {
