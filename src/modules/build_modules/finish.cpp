@@ -53,9 +53,7 @@ std::string trim_token(const std::string& str) {
 void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_dir, const std::vector<std::string>& arch_list) {
     // Direct lookup from the pre-parsed configuration object array vector!
     std::vector<std::string> targeted_libs = config.system_shared_libs;
-
-    UI::stage("NDK Syslibs", "Auto-resolving system shared dependencies from Termux ndk-multilib");
-
+    
     fs::path termux_usr_dir = "/data/data/com.termux/files/usr";
     fs::path termux_global_lib = "/data/data/com.termux/files/usr/lib";
     
@@ -135,9 +133,9 @@ void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_
             if (found) {
                 try {
                     fs::copy_file(source_file, target_abi_dir / filename, fs::copy_options::overwrite_existing);
-                    UI::info("[+] Auto-placed [" + abi_name + "]: " + filename);
+                    UI::info(UI::Msg::OP_LIB_AUTOPLACED + "[" + abi_name + "] " + filename);
                 } catch (const fs::filesystem_error& e) {
-                    UI::error("Failed copying library dependency target context: " + filename + " to " + abi_name, e.what());
+                    UI::error("Failed to copy library dependency: " + filename + " to " + abi_name, e.what());
                 }
             } else {
                 throw std::runtime_error("Architecture Build Error: Cannot resolve dependency library runtime file link handle '" + filename + "' for targeted ABI [" + abi_name + "].");
@@ -157,8 +155,6 @@ Result<void> inject_assets_and_dex(
     const std::vector<std::string>& allowed_abis,
     bool is_release) 
 {
-    UI::stage("Packager", "Injecting DEX bytecode components, raw runtime assets, and cross-compiled libraries mapping tables securely");
-
     fs::path dex_file = bin_dir / "classes.dex";
     fs::path native_libs_path = bin_dir / "lib";
     fs::path resolved_assets = assets_dir.empty() ? "" : fs::absolute(assets_dir);
@@ -228,13 +224,10 @@ Result<void> inject_assets_and_dex(
         bool is_native_lib = (arc_path.rfind("lib/", 0) == 0 && real_path.extension() == ".so");
         fs::path file_to_inject = real_path;
 
-        // OPTIMIZATION 1: If it's a release build and a native library, strip all debug symbols safely!
+        // Optimization: Strip symbols from native libraries in release builds
         if (is_release && is_native_lib) {
-            UI::info("[STRIP] Evicting unneeded metadata symbols safely via posix_spawn: " + arc_path);
-            
             std::string abs_path_str = fs::absolute(real_path).string();
             
-            // Explicit positional structural mapping configuration for strip arguments
             char* strip_args[] = {
                 const_cast<char*>("strip"),
                 const_cast<char*>("--strip-unneeded"),
@@ -245,7 +238,6 @@ Result<void> inject_assets_and_dex(
             pid_t pid;
             int spawn_status = posix_spawn(&pid, "/data/data/com.termux/files/usr/bin/strip", nullptr, nullptr, strip_args, environ);
             
-            // Fallback search to path variable if explicit Termux prefix constraint fails
             if (spawn_status != 0) {
                 spawn_status = posix_spawnp(&pid, "strip", nullptr, nullptr, strip_args, environ);
             }
@@ -254,28 +246,20 @@ Result<void> inject_assets_and_dex(
                 int wait_status;
                 if (waitpid(pid, &wait_status, 0) != -1) {
                     if (!WIFEXITED(wait_status) || WEXITSTATUS(wait_status) != 0) {
-                        UI::warn("Code stripping binary process returned non-zero execution flag on: " + arc_path);
+                        UI::warn("Binary code optimisation failed");
                     }
-                } else {
-                    UI::warn("Failed to wait for active stripping subprocess tracking context.");
                 }
-            } else {
-                UI::warn("Process invocation barrier dropped error flags. Skipping stripping pass optimization rules.");
-            }
+            } 
         }
 
         zip_source_t* src = zip_source_file(apk, file_to_inject.string().c_str(), 0, 0);
         if (src) {
             zip_int64_t new_idx = zip_file_add(apk, arc_path.c_str(), src, ZIP_FL_OVERWRITE);
             
+            // All variables (new_idx, is_native_lib, arc_path) are scoped inside here:
             if (new_idx >= 0 && is_native_lib) {
-                if (is_release) {
-                    zip_set_file_compression(apk, new_idx, ZIP_CM_DEFLATE, 9);
-                    UI::info("[RELEASE-COMPRESS] Deflated allocation table layout: " + arc_path + " (Max Size Savings)");
-                } else {
-                    zip_set_file_compression(apk, new_idx, ZIP_CM_STORE, 0);
-                    UI::info("[DEBUG-STORE] Stored uncompressed asset chunk: " + arc_path + " (Zero-Extraction Layout Ready)");
-                }
+                // Keep .so files STORED (uncompressed) for direct mmap and 16KB/4KB page alignment
+                zip_set_file_compression(apk, new_idx, ZIP_CM_STORE, 0);
             }
         }
     }
@@ -287,7 +271,7 @@ Result<void> inject_assets_and_dex(
 // Optimizes the APK for RAM efficiency.
 fs::path align_apk(const std::string& ZIPALIGN, const std::string& alignment, 
                    const fs::path& in_apk, const fs::path& bin_dir, RunFunc run_func) {
-    UI::stage("ZipAlign", "Aligning archive layout borders for RAM access page performance optimizations");
+    UI::stage(UI::Msg::STAGE_ALIGN, UI::Msg::OP_ALIGNING);
     fs::path aligned_apk = bin_dir / "aligned_temp.apk";
 
     if (fs::exists(aligned_apk)) fs::remove(aligned_apk);
@@ -304,12 +288,11 @@ fs::path align_apk(const std::string& ZIPALIGN, const std::string& alignment,
 Result<void> sign_apk(const std::string& APKSIGNER, const fs::path& final_apk, 
                       const fs::path& aligned_apk, const std::string& keystore, 
                       const std::string& alias, RunFunc run_func) {
-    
-    UI::stage("ApkSigner", "Generating cryptographic profile signatures block into " + final_apk.filename().string());
-
+                          
+    // Declare and resolve ks_path first
     fs::path ks_path = fs::absolute(keystore);
     if (!fs::exists(ks_path)) {
-        return Result<void>::error("Security certificate footprint missing: Security profile store file not verified at destination context: " + ks_path.string());
+        return Result<void>::error(UI::Msg::ERR_KEYSTORE_MISSING + ": " + ks_path.string());
     }
 
     // Base positional arguments matching target profile signatures
@@ -320,7 +303,7 @@ Result<void> sign_apk(const std::string& APKSIGNER, const fs::path& final_apk,
         "--out", final_apk.string()
     };
 
-    // If handling the localized automated debug profile layout
+    // Automated debug profile credentials
     if (alias == "androiddebugkey") {
         args.push_back("--ks-pass");
         args.push_back("pass:android");
@@ -330,9 +313,8 @@ Result<void> sign_apk(const std::string& APKSIGNER, const fs::path& final_apk,
                         
     args.push_back(aligned_apk.string());
     
-    // Executes cleanly via native fork/exec (thanks to our smart_run patch),
-    // inheriting the interactive console shell.
-    run_func(args, "ApkSigner runtime verification tracking block dropped fatal signature errors.");
+    auto res = run_func(args, "ApkSigner runtime verification failed.");
+    if (res.is_err()) return res;
 
     if (fs::exists(aligned_apk)) fs::remove(aligned_apk);
     return Result<void>::success();
@@ -343,7 +325,6 @@ Result<std::pair<std::string, std::string>> handle_debug_keystore() {
     fs::path home;
 
     if (!home_env || std::string(home_env).empty()) {
-        UI::warn("HOME environment variable is undefined or empty. Falling back to current working directory for debug keys.");
         home = fs::current_path();
     } else {
         home = fs::path(home_env);
@@ -352,7 +333,6 @@ Result<std::pair<std::string, std::string>> handle_debug_keystore() {
     fs::path debug_ks = home / ".android/debug.keystore";
 
     if (!fs::exists(debug_ks)) {
-        UI::info("Development encryption profiles missing locally. Restoring default debug.keystore structural maps securely...");
         fs::create_directories(debug_ks.parent_path());
         
         std::string ks_str = debug_ks.string();
@@ -386,10 +366,8 @@ Result<std::pair<std::string, std::string>> handle_debug_keystore() {
             int wait_status;
             if (waitpid(pid, &wait_status, 0) != -1) {
                 if (!WIFEXITED(wait_status) || WEXITSTATUS(wait_status) != 0) {
-                    UI::warn("Automated keytool profile certificate generation returned a non-zero execution status flag.");
+                    UI::warn(UI::Msg::WARN_KEYSTORE_FAIL);
                 }
-            } else {
-                UI::warn("Failed to wait for the active keytool generation subprocess tracking thread.");
             }
         } else {
             return Result<std::pair<std::string, std::string>>::error("Security certificate generation failure: posix_spawn failed to execute 'keytool'.");

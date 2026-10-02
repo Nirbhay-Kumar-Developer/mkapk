@@ -87,10 +87,23 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     auto native_worker = std::async(std::launch::async, [&]() -> Result<void> {
         return native_stage.execute(config, ctx);
     });
-
+    
     Result<void> res_resource = resource_worker.get();
     if (res_resource.is_err()) throw std::runtime_error("Resource pipeline failure: " + res_resource.get_error());
-
+    
+    // Synchronize R.txt state POST-AAPT2 link:
+    fs::path r_txt_path = ctx.build_dir / "R.txt";
+    std::string post_link_r_hash = fs::exists(r_txt_path) ? get_file_hash(r_txt_path) : "";
+    std::string old_r_hash = ctx.new_state["meta|r_txt"]; // Loaded prior to link
+    
+    if (post_link_r_hash != old_r_hash) {
+        ctx.diff.r_txt_changed = true;
+        ctx.diff.needs_jvm_compile = true;
+        ctx.diff.needs_dex_rebuild = true;
+        ctx.diff.needs_repackage = true;
+        ctx.new_state["meta|r_txt"] = post_link_r_hash; // Persist fresh hash
+    }
+    
     auto jvm_worker = std::async(std::launch::async, [&]() -> Result<void> {
         return jvm_stage.execute(config, ctx);
     });
@@ -100,9 +113,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
 
     Result<void> res_jvm = jvm_worker.get();
     if (res_jvm.is_err()) throw std::runtime_error("JVM pipeline failure: " + res_jvm.get_error());
-
-    UI::info("All concurrent compilation tracks synchronization barriers cleared.");
-
+    
     Result<void> res_pack = pkg_stage.execute(config, ctx);
     if (res_pack.is_err()) throw std::runtime_error("Packaging failure: " + res_pack.get_error());
 

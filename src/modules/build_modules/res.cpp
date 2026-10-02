@@ -24,17 +24,17 @@ Result<void> compile_resources(
     // --- PHASE 1: PROCESS CORE APPLICATION RESOURCES ---
     if (fs::exists(res_dir)) {
         if (changed_res_files == nullptr) {
-            UI::stage(UI::Msg::RES_STAGE, "Compiling all localized targets via aapt2");
+            UI::stage(UI::Msg::STAGE_RES, "Compiling resources");
             
             std::vector<std::string> args = {
                 AAPT2, "compile",
                 "--dir", fs::absolute(res_dir).string(),
                 "-o", fs::absolute(flat_dir).string()
             };
-            run_func(args, "Full resource compilation failed");
+            return run_func(args, "Full resource compilation failed");
         } 
         else if (!changed_res_files->empty()) {
-            UI::stage(UI::Msg::RES_STAGE, "Batch compilation pass for " + std::to_string(changed_res_files->size()) + " files");
+            UI::stage(UI::Msg::STAGE_RES, "Compiling " + std::to_string(changed_res_files->size()) + " resource files");
 
             std::vector<std::string> args = {
                 AAPT2, "compile",
@@ -45,10 +45,7 @@ Result<void> compile_resources(
                 args.push_back(fs::absolute(f).string());
             }
             
-            run_func(args, "Batch resource compilation failed");
-        } 
-        else {
-            UI::info("No core resource modifications tracked by change engine.");
+            return run_func(args, "Batch resource compilation failed");
         }
     } else {
         UI::warn("Primary resource directory not located at: " + res_dir.string());
@@ -67,22 +64,26 @@ Result<void> link_manifest(
     RunFunc run_func,
     bool debug) 
 {
-    UI::stage("Resource Linker", debug ? "Assembling development variant (DEBUG)" : "Assembling production variant");
+    UI::stage(UI::Msg::STAGE_RES_LINK);
 
     if (!fs::exists(manifest)) {
-        throw std::runtime_error("Manifest missing: Cannot link resources without a valid AndroidManifest.xml at " + manifest.string());
+        return Result<void>::error(UI::Msg::ERR_MANIFEST_MISSING);
     }
     if (!fs::exists(android_jar)) {
-        throw std::runtime_error("SDK missing: android.jar not found at " + android_jar.string());
+        return Result<void>::error(UI::Msg::ERR_SDK_MISSING);
     }
 
+    // --- DECLARE FLAT_DIR HERE ---
     fs::path flat_dir = bin_dir / "flat_res";
     if (!fs::exists(flat_dir) || fs::is_empty(flat_dir)) {
-        throw std::runtime_error("Compilation path context empty: No verified intermediate .flat asset data ready for link passes.");
+        return Result<void>::error(UI::Msg::FATAL_INTERNAL);
     }
 
     fs::path gen_dir = bin_dir / "gen";
     fs::create_directories(gen_dir);
+
+    fs::path aapt_proguard_rules = bin_dir / "aapt_rules.pro";
+    fs::path r_txt_symbols = bin_dir / "R.txt";
 
     std::vector<std::string> args = {
         AAPT2, "link",
@@ -90,11 +91,22 @@ Result<void> link_manifest(
         "-I", fs::absolute(android_jar).string(),
         "--manifest", fs::absolute(manifest).string(),
         "--java", fs::absolute(gen_dir).string(), 
-        "--auto-add-overlay"
+        "--auto-add-overlay",
+        "--proguard", fs::absolute(aapt_proguard_rules).string(),
+        "--output-text-symbols", fs::absolute(r_txt_symbols).string()
     };
 
     if (debug) {
         args.push_back("--debug-mode");
+    } else {
+        args.push_back("--enable-sparse-encoding");
+    }
+
+    // Pass all compiled .flat files
+    for (const auto& entry : fs::recursive_directory_iterator(flat_dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".flat") {
+            args.push_back(fs::absolute(entry.path()).string());
+        }
     }
 
     auto res = run_func(args, "Manifest asset linking generation dropped errors.");
@@ -109,12 +121,16 @@ fs::path obfuscate_resources(
     const fs::path& build_dir,
     RunFunc run_func) 
 {
-    UI::stage("Obfuscator", "Executing asset minification routines via AndResGuard");
-
+    UI::stage(UI::Msg::STAGE_OBFUSCATE, UI::Msg::OP_OBFUSCATING);
+    
     fs::path resguard_out = build_dir / "resguard_out";
     if (fs::exists(resguard_out)) fs::remove_all(resguard_out);
+    fs::create_directories(resguard_out);
 
-    fs::path config_xml = fs::current_path() / "andresguard.xml";
+    fs::path config_xml = fs::current_path() / "andresguard-config.xml";
+    if (!fs::exists(config_xml)) {
+        config_xml = fs::current_path() / "andresguard.xml";
+    }
 
     std::vector<std::string> args = {
         RESGUARD_TOOL,
@@ -127,16 +143,41 @@ fs::path obfuscate_resources(
         args.push_back(fs::absolute(config_xml).string());
     }
 
-    run_func(args, "AndResGuard resource obfuscation failed.");
-
-    if (fs::exists(resguard_out)) {
-        for (const auto& entry : fs::recursive_directory_iterator(resguard_out)) {
-            if (entry.path().extension() == ".apk") {
-                return entry.path();
-            }
-        }
+    // Incremental resource mapping reuse to maintain stable IDs across builds
+    fs::path prev_mapping = build_dir / "resource_mapping.txt";
+    if (fs::exists(prev_mapping)) {
+        args.push_back("-mapping");
+        args.push_back(fs::absolute(prev_mapping).string());
     }
 
-    UI::warn("AndResGuard execution completed but no output APK was found. Reverting to base package.");
+    auto res = run_func(args, "AndResGuard resource obfuscation failed.");
+    if (res.is_err()) {
+        UI::warn("AndResGuard returned an error: " + res.get_error());
+        return in_apk;
+    }
+
+    // Cache the mapping file for the next build pass
+    fs::path generated_mapping = resguard_out / "resource_mapping.txt";
+    if (fs::exists(generated_mapping)) {
+        fs::copy_file(generated_mapping, prev_mapping, fs::copy_options::overwrite_existing);
+    }
+
+    // Discover the valid output APK produced by AndResGuard
+    if (fs::exists(resguard_out)) {
+        fs::path candidate = "";
+        for (const auto& entry : fs::recursive_directory_iterator(resguard_out)) {
+            if (entry.path().extension() == ".apk") {
+                std::string fname = entry.path().filename().string();
+                // Select unsigned or 7zip repackaged container to forward to zipalign/apksigner
+                if (fname.find("_unsigned") != std::string::npos || fname.find("_7zip") != std::string::npos) {
+                    return entry.path();
+                }
+                candidate = entry.path();
+            }
+        }
+        if (!candidate.empty()) return candidate;
+    }
+
+    UI::warn("AndResGuard completed but output APK not found. Reverting to base package.");
     return in_apk;
 }
