@@ -14,6 +14,7 @@
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_config.hpp"
+#include "mkapk_plugin_manager.hpp"
 
 namespace fs = std::filesystem;
 
@@ -160,7 +161,7 @@ public:
         next_state["meta|mode"] = current_mode;
 
         // 2. Discover Plugins
-        std::map<std::string, LanguagePlugin> installed_plugins = MkapkEnv::load_installed_plugins();
+        std::map<std::string, LanguagePlugin> installed_plugins = MkapkPluginManager::load_installed_plugins();
         if (installed_plugins.find(".java") == installed_plugins.end()) {
             installed_plugins[".java"] = {"java", "javac", ".java", "jvm", "", true};
         }

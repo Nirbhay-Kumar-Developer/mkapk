@@ -10,6 +10,7 @@
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_config.hpp"
+#include "mkapk_plugin_manager.hpp"
 #include "pipeline_stage.hpp"
 
 namespace fs = std::filesystem;
@@ -38,7 +39,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     fs::create_directories(ctx.build_dir);
 
     ctx.tools = MkapkEnv::get_tools_map(config);
-    ctx.active_plugins = MkapkEnv::load_installed_plugins();
+    ctx.active_plugins = MkapkPluginManager::load_installed_plugins();
 
     ctx.run_func = [](const std::vector<std::string>& args, const std::string& err_msg) -> Result<void> {
         return smart_run(args, err_msg);

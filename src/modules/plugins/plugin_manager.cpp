@@ -23,7 +23,7 @@ using json = nlohmann::json;
 
 extern char** environ;
 
-namespace MkapkEnv {
+namespace MkapkPluginManager {
     
     const std::string PLUGINS_CACHE_DIR = "/data/data/com.termux/files/usr/var/lib/mkapk/plugins/";
 
