@@ -1,9 +1,8 @@
 build/
+test/
 bundle.sh
 bundle.cpp
-test/,
+test
 compile_commands.json
-.cache/
-diff.cpp
 to-do.txt
-test/
+.cache

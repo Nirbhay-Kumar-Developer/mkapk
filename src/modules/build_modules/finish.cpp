@@ -144,8 +144,7 @@ void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_
     }
 }
 
- // SECTION 2: APK ASSEMBLY, ALIGNMENT, AND SIGNING STAGES
- 
+// SECTION 2: APK ASSEMBLY, ALIGNMENT, AND SIGNING STAGES
 
 // Injects classes.dex, assets, and ONLY the requested native libraries for this package task.
 Result<void> inject_assets_and_dex(
@@ -246,7 +245,7 @@ Result<void> inject_assets_and_dex(
                 int wait_status;
                 if (waitpid(pid, &wait_status, 0) != -1) {
                     if (!WIFEXITED(wait_status) || WEXITSTATUS(wait_status) != 0) {
-                        UI::warn("Binary code optimisation failed");
+                        UI::warn(UI::Msg::WARN_STRIP_FAIL);
                     }
                 }
             } 
@@ -256,9 +255,8 @@ Result<void> inject_assets_and_dex(
         if (src) {
             zip_int64_t new_idx = zip_file_add(apk, arc_path.c_str(), src, ZIP_FL_OVERWRITE);
             
-            // All variables (new_idx, is_native_lib, arc_path) are scoped inside here:
+            // Keep .so files STORED (uncompressed) for direct mmap and 16KB/4KB page alignment
             if (new_idx >= 0 && is_native_lib) {
-                // Keep .so files STORED (uncompressed) for direct mmap and 16KB/4KB page alignment
                 zip_set_file_compression(apk, new_idx, ZIP_CM_STORE, 0);
             }
         }
@@ -289,7 +287,6 @@ Result<void> sign_apk(const std::string& APKSIGNER, const fs::path& final_apk,
                       const fs::path& aligned_apk, const std::string& keystore, 
                       const std::string& alias, RunFunc run_func) {
                           
-    // Declare and resolve ks_path first
     fs::path ks_path = fs::absolute(keystore);
     if (!fs::exists(ks_path)) {
         return Result<void>::error(UI::Msg::ERR_KEYSTORE_MISSING + ": " + ks_path.string());

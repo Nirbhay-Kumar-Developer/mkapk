@@ -35,6 +35,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     ctx.manifest_path = fs::absolute(MkapkEnv::resolve_path(config.manifest));
     ctx.active_manifest_path = ctx.manifest_path;
     ctx.android_jar = fs::absolute(MkapkEnv::get_android_jar(config));
+
     fs::create_directories(ctx.bin_dir);
     fs::create_directories(ctx.build_dir);
 
@@ -75,12 +76,16 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     }
 
     ctx.resources_triggered = (ctx.diff.res_changed || ctx.diff.manifest_changed || ctx.force_all);
-    
+
+    DependencyStage dep_stage;
     ResourceStage res_stage;
     NativeStage native_stage;
     JvmStage jvm_stage;
     PackageStage pkg_stage;
-    
+
+    Result<void> res_dep = dep_stage.execute(config, ctx);
+    if (res_dep.is_err()) throw std::runtime_error("Dependency resolution failure: " + res_dep.get_error());
+
     auto resource_worker = std::async(std::launch::async, [&]() -> Result<void> {
         return res_stage.execute(config, ctx);
     });
@@ -88,23 +93,23 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     auto native_worker = std::async(std::launch::async, [&]() -> Result<void> {
         return native_stage.execute(config, ctx);
     });
-    
+
     Result<void> res_resource = resource_worker.get();
     if (res_resource.is_err()) throw std::runtime_error("Resource pipeline failure: " + res_resource.get_error());
-    
+
     // Synchronize R.txt state POST-AAPT2 link:
     fs::path r_txt_path = ctx.build_dir / "R.txt";
     std::string post_link_r_hash = fs::exists(r_txt_path) ? get_file_hash(r_txt_path) : "";
-    std::string old_r_hash = ctx.new_state["meta|r_txt"]; // Loaded prior to link
-    
+    std::string old_r_hash = ctx.new_state["meta|r_txt"];
+
     if (post_link_r_hash != old_r_hash) {
         ctx.diff.r_txt_changed = true;
         ctx.diff.needs_jvm_compile = true;
         ctx.diff.needs_dex_rebuild = true;
         ctx.diff.needs_repackage = true;
-        ctx.new_state["meta|r_txt"] = post_link_r_hash; // Persist fresh hash
+        ctx.new_state["meta|r_txt"] = post_link_r_hash;
     }
-    
+
     auto jvm_worker = std::async(std::launch::async, [&]() -> Result<void> {
         return jvm_stage.execute(config, ctx);
     });
@@ -114,7 +119,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
 
     Result<void> res_jvm = jvm_worker.get();
     if (res_jvm.is_err()) throw std::runtime_error("JVM pipeline failure: " + res_jvm.get_error());
-    
+
     Result<void> res_pack = pkg_stage.execute(config, ctx);
     if (res_pack.is_err()) throw std::runtime_error("Packaging failure: " + res_pack.get_error());
 

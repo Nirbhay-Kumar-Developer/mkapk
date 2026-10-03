@@ -31,42 +31,37 @@ namespace MkapkEnv {
 
     // Forward helper for standard execution tracking
     bool run_system_cmd(const std::vector<std::string>& args) {
-    if (args.empty()) {
+        if (args.empty()) {
+            return false;
+        }
+
+        // Prepare the arguments array for the C API
+        std::vector<char*> c_args;
+        c_args.reserve(args.size() + 1);
+        for (const auto& arg : args) {
+            c_args.push_back(const_cast<char*>(arg.c_str()));
+        }
+        c_args.push_back(nullptr);
+
+        pid_t pid;
+        int spawn_status = posix_spawnp(&pid, c_args[0], nullptr, nullptr, c_args.data(), environ);
+
+        if (spawn_status == 0) {
+            int status;
+            if (waitpid(pid, &status, 0) != -1) {
+                return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+            }
+        }
+        
         return false;
     }
-
-    // Prepare the arguments array for the C API
-    std::vector<char*> c_args;
-    c_args.reserve(args.size() + 1); // Minor optimization to prevent reallocation
-    for (const auto& arg : args) {
-        c_args.push_back(const_cast<char*>(arg.c_str()));
-    }
-    c_args.push_back(nullptr);
-
-    pid_t pid;
     
-    // We use posix_spawnp (with the 'p') to mirror execvp's PATH resolution behavior.
-    // If you used posix_spawn, you would have to provide absolute paths.
-    int spawn_status = posix_spawnp(&pid, c_args[0], nullptr, nullptr, c_args.data(), environ);
-
-    // spawn_status is 0 on success
-    if (spawn_status == 0) {
-        int status;
-        // Block and wait for the child process to finish
-        if (waitpid(pid, &status, 0) != -1) {
-            return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
-        }
-    }
-    
-    return false;
-}
-    
-      MkapkConfig load_config(const fs::path& config_path) {
+    MkapkConfig load_config(const fs::path& config_path) {
         MkapkConfig config;
         
         // 1. Validate file exists in the targeted directory
         if (!fs::exists(config_path)) {
-            return config; // is_valid remains false, triggering your CONFIG_MISSING error
+            return config;
         }
 
         // 2. Read the file
@@ -78,7 +73,7 @@ namespace MkapkEnv {
         
         std::string config_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-        // 3. Parse without hardcoded fallback configurations
+        // 3. Parse JSON layout safely
         try {
             json j = json::parse(config_content);
 
@@ -102,6 +97,12 @@ namespace MkapkEnv {
             if (j.contains("SYSTEM_SHARED_LIBS") && j["SYSTEM_SHARED_LIBS"].is_array()) {
                 for (const auto& lib : j["SYSTEM_SHARED_LIBS"]) {
                     if (lib.is_string()) config.system_shared_libs.push_back(lib.get<std::string>());
+                }
+            }
+            
+            if (j.contains("DEPENDENCIES") && j["DEPENDENCIES"].is_array()) {
+                for (const auto& dep : j["DEPENDENCIES"]) {
+                    if (dep.is_string()) config.dependencies.push_back(dep.get<std::string>());
                 }
             }
 
@@ -135,26 +136,24 @@ namespace MkapkEnv {
     }
 
     fs::path resolve_path(std::string path_str) {
-    if (path_str.empty()) return "";
-    if (path_str[0] == '~') {
-        const char* home = std::getenv("HOME");
-        if (home) {
-            std::string remainder = (path_str.size() > 1 && path_str[1] == '/') ? path_str.substr(2) : path_str.substr(1);
-            return fs::absolute(fs::path(home) / remainder);
+        if (path_str.empty()) return "";
+        if (path_str[0] == '~') {
+            const char* home = std::getenv("HOME");
+            if (home) {
+                std::string remainder = (path_str.size() > 1 && path_str[1] == '/') ? path_str.substr(2) : path_str.substr(1);
+                return fs::absolute(fs::path(home) / remainder);
+            }
         }
+        return fs::absolute(fs::path(path_str));
     }
-    return fs::absolute(fs::path(path_str));
-}
 
-        fs::path get_android_jar(const MkapkConfig& config) {
-        // Read directly out of struct configuration fields
+    fs::path get_android_jar(const MkapkConfig& config) {
         if (!config.sdk_root.empty() && !config.target_sdk.empty()) {
             fs::path sdk_root = resolve_path(config.sdk_root);
             fs::path jar_path = sdk_root / "platforms" / ("android-" + config.target_sdk) / "android.jar";
             if (fs::exists(jar_path)) return fs::absolute(jar_path);
         }
 
-        // Log cleanly via UI wrapper and terminate build immediately
         UI::error("Architecture Build Error: android.jar dependencies not found.", 
                   "Verify that 'SDK_ROOT' and 'TARGET_SDK' are configured correctly inside your config.json.");
         std::exit(1);
@@ -184,23 +183,23 @@ namespace MkapkEnv {
 
     std::string get_jni_classpath(const MkapkConfig& config) {
         if (config.sdk_root.empty()) {
-             UI::warn("SDK_ROOT variable context not explicit in project layout configuration file.");
+            UI::warn("SDK_ROOT variable context not explicit in project layout configuration file.");
         }
         
         fs::path sdk_root = resolve_path(config.sdk_root);
-        
-        fs::path coord_jar = fs::path(TERMUX_SHARE) / "mkapk/mkapk-coordinator.jar";
-        fs::path apksigner_jar = fs::path(TERMUX_SHARE) / "java/apksigner.jar";
-        
-        fs::path r8_jar = sdk_root / "cmdline-tools/latest/lib/r8.jar";
-        fs::path d8_jar = sdk_root / "cmdline-tools/latest/lib/d8-classpath.jar";
-        
-        fs::path resguard_jar = resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
-        
-        fs::path kotlin_preloader = "/data/data/com.termux/files/usr/opt/kotlin/lib/kotlin-preloader.jar";
+        fs::path cmdline_lib = sdk_root / "cmdline-tools/latest/lib";
+        fs::path prefix_java = fs::path(TERMUX_SHARE) / "java";
 
         std::vector<std::string> cp_entries;
-        
+
+        // 1. CORE MKAPK & COMPILER UTILITIES
+        fs::path coord_jar = fs::path(TERMUX_SHARE) / "mkapk/mkapk-coordinator.jar";
+        fs::path apksigner_jar = prefix_java / "apksigner.jar";
+        fs::path r8_jar = cmdline_lib / "r8.jar";
+        fs::path d8_jar = cmdline_lib / "d8-classpath.jar";
+        fs::path resguard_jar = resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
+        fs::path kotlin_preloader = "/data/data/com.termux/files/usr/opt/kotlin/lib/kotlin-preloader.jar";
+
         if (fs::exists(coord_jar)) cp_entries.push_back(coord_jar.string());
         else UI::error("Missing tool dependency footprint registry path", coord_jar.string());
 
@@ -211,12 +210,35 @@ namespace MkapkEnv {
         else UI::error("Missing tool dependency footprint registry path", apksigner_jar.string());
 
         if (fs::exists(d8_jar)) cp_entries.push_back(d8_jar.string());
-
         if (fs::exists(resguard_jar)) cp_entries.push_back(resguard_jar.string());
-        
         if (fs::exists(kotlin_preloader)) cp_entries.push_back(kotlin_preloader.string());
-        else UI::error("Kotlin Compiler installation not found at standard path");
 
+        // 2. DYNAMIC ANDROID SDK COMPONENT INJECTIONS (Manifest Merger, etc.)
+        if (fs::exists(cmdline_lib)) {
+            for (const auto& entry : fs::recursive_directory_iterator(cmdline_lib)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".jar") {
+                    std::string filename = entry.path().filename().string();
+                    if (filename.find("kotlin") == std::string::npos) {
+                        cp_entries.push_back(entry.path().string());
+                    }
+                }
+            }
+        } else {
+            UI::warn("Android SDK cmdline-tools missing at: " + cmdline_lib.string());
+        }
+
+        // 3. SYSTEM JAVA LIBRARIES (Maven resolver dependencies)
+        if (fs::exists(prefix_java)) {
+            for (const auto& entry : fs::directory_iterator(prefix_java)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".jar") {
+                    cp_entries.push_back(entry.path().string());
+                }
+            }
+        } else {
+            UI::warn("System Java share directory missing at: " + prefix_java.string());
+        }
+
+        // 4. CLASSPATH FORMAT ASSEMBLER LOOP
         std::string full_cp = "";
         for (size_t i = 0; i < cp_entries.size(); ++i) {
             full_cp += cp_entries[i] + (i == cp_entries.size() - 1 ? "" : ":");
@@ -224,12 +246,9 @@ namespace MkapkEnv {
         
         return full_cp;
     }
-    
-    // Removed redundant NATIVE_TARGETS psrsing
 
     bool init_project() {
-        
-        const fs::path TEMPLATE_PATH = fs::path(TERMUX_ETC) / ".setup/proj-templates/android";
+        const fs::path TEMPLATE_PATH = fs::path(TERMUX_ETC) / "setup/proj-templates/android";
         UI::stage("Initialization", "Seeding default template paths structure");
 
         if (!fs::exists(TEMPLATE_PATH)) {

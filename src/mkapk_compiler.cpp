@@ -96,9 +96,9 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
     std::map<std::string, std::vector<fs::path>>& changed_files,
     std::map<std::string, std::vector<fs::path>>& deleted_files,
     bool do_res,
-    RunFunc run) 
+    RunFunc run,
+    const std::vector<fs::path>& extra_jvm_classpaths) 
 {
-
     fs::path java_out = fs::absolute(bin_dir / "classes" / "java_classes");
     fs::path dex_cache = fs::absolute(bin_dir / "dex_cache");
     fs::path gen_src = fs::absolute(bin_dir / "gen"); 
@@ -109,6 +109,12 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
     // 1. Clean up stale class/dex files
     cleanup_stale_assets(deleted_files, java_out, dex_cache);
 
+    // Convert extra_jvm_classpaths to string vector for Kotlinc
+    std::vector<std::string> classpath_extra_strs;
+    for (const auto& p : extra_jvm_classpaths) {
+        classpath_extra_strs.push_back(fs::absolute(p).string());
+    }
+
     // --- PHASE 0: EXTRACT KOTLIN STANDARD LIBRARY ---
     if (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty()) {
         const char* prefix_env = std::getenv("PREFIX");
@@ -117,7 +123,6 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
 
         if (fs::exists(stdlib_jar)) {
             if (!fs::exists(java_out / "kotlin/Unit.class")) {
-                
                 std::vector<std::string> unzip_args = {
                     "unzip", "-q", "-o", 
                     stdlib_jar.string(), 
@@ -156,7 +161,7 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
 
     changed_files["java"] = unified_java_sources;
 
-            // --- PHASE 2: JOINT KOTLIN COMPILATION STEP ---
+    // --- PHASE 2: JOINT KOTLIN COMPILATION STEP ---
     if (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty()) {
         std::string compose_plug = config.compose_plugin;
         std::vector<fs::path> joint_sources = changed_files["kotlin"];
@@ -171,7 +176,8 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
             joint_sources,
             run,
             compose_plug,
-            is_release
+            is_release,
+            classpath_extra_strs
         );
         if (kot_res.is_err()) {
             return Result<std::pair<fs::path, fs::path>>::error(kot_res.get_error());
@@ -190,7 +196,8 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
             fs::absolute(android_jar), 
             fs::absolute(java_out), 
             changed_files["java"], 
-            run
+            run,
+            extra_jvm_classpaths
         );
         if (java_res.is_err()) {
             return Result<std::pair<fs::path, fs::path>>::error(java_res.get_error());

@@ -11,7 +11,13 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
 
     fs::path base_unsigned_apk = ctx.build_dir / "unsigned.apk";
     
-    // Strict boundary: ResourceStage is solely responsible for creating unsigned.apk
+    // Safety check: recover base container if an upstream anomaly missed it
+    if (!ctx.resources_triggered && !fs::exists(base_unsigned_apk)) {
+        UI::warn("Base container missing. Forcing resource link pass resolution...");
+        auto link_res = link_manifest(ctx.tools["aapt2"], base_unsigned_apk, ctx.android_jar, ctx.active_manifest_path, ctx.build_dir, ctx.src_dir, ctx.run_func, !ctx.is_release);
+        if (link_res.is_err()) return link_res;
+    }
+
     if (!fs::exists(base_unsigned_apk)) {
         return Result<void>::error(UI::Msg::FATAL_INTERNAL);
     }
@@ -88,7 +94,10 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
     }
 
     save_state(ctx.build_dir, ctx.new_state, ctx.is_release);
-    ctx.final_output_msg = dynamic_ret_path;
+
+    ctx.final_output_msg = ctx.ndk_all ? 
+        "Split architecture packaging structural distribution layout written within: " + ctx.bin_dir.string() : 
+        dynamic_ret_path;
 
     return Result<void>::success();
 }

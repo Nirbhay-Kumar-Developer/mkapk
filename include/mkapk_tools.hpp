@@ -86,7 +86,8 @@ Result<void> compile_incremental_java(
     const fs::path& android_jar,
     const fs::path& out_dir,
     const std::vector<fs::path>& changed_files,
-    RunFunc run_func
+    RunFunc run_func,
+    const std::vector<fs::path>& extra_dependency_jars = {}
 );
 
 Result<void> compile_incremental_kotlin(
@@ -96,7 +97,17 @@ Result<void> compile_incremental_kotlin(
     const std::vector<fs::path>& changed_files,
     RunFunc run_func,
     const std::string& compose_plugin = "",
-    bool is_release = false
+    bool is_release = false,
+    const std::vector<std::string>& classpath_extra = {}
+);
+
+Result<void> compile_kotlin(
+    const std::string& KOTLINC,
+    const fs::path& android_jar,
+    const fs::path& classes_dir,
+    const fs::path& src_dir,
+    RunFunc run_func,
+    const std::string& compose_plugin = ""
 );
 
 // Resources
@@ -105,7 +116,8 @@ Result<void> compile_resources(
     const fs::path& res_dir,
     const fs::path& bin_dir,
     RunFunc run_func,
-    const std::vector<fs::path>* changed_res_files = nullptr
+    const std::vector<fs::path>* changed_res_files = nullptr,
+    const std::vector<fs::path>& extra_dependency_res_dirs = {}
 );
 
 Result<void> link_manifest(
@@ -163,10 +175,11 @@ Result<void> run_incremental_dex(
     const fs::path& java_out,
     const fs::path& dex_cache,
     const std::vector<fs::path>& files_to_dex,
+    const std::vector<fs::path>& extra_jvm_classpaths,
     RunFunc run
 );
 
-// FIX: Packaging components now return Result configurations
+// Packaging
 Result<void> inject_assets_and_dex(
     const fs::path& unsigned_apk, 
     const fs::path& bin_dir, 

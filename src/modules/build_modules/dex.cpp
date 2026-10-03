@@ -32,7 +32,8 @@ std::vector<std::string> get_all_class_files(const fs::path& bin_dir) {
 }
 
 /**
- * Converts .class files to .dex incrementally using D8 with Java 8+ desugaring.
+ * Converts .class files to .dex incrementally using D8 with Java 8+ desugaring
+ * and supports external dependency classpaths (AAR/JAR).
  */
 Result<void> run_incremental_dex(
     const std::string& D8,
@@ -41,6 +42,7 @@ Result<void> run_incremental_dex(
     const fs::path& java_out,
     const fs::path& dex_cache,
     const std::vector<fs::path>& files_to_dex,
+    const std::vector<fs::path>& extra_jvm_classpaths,
     RunFunc run) 
 {
     if (files_to_dex.empty()) return Result<void>::success();
@@ -72,7 +74,13 @@ Result<void> run_incremental_dex(
                 "--classpath", fs::absolute(java_out).string(),
                 "--output", fs::absolute(target_dex_dir).string()
             };
-            
+
+            // Inject extra dependency archives (from AAR/JAR) for interface desugaring
+            for (const auto& jar : extra_jvm_classpaths) {
+                d8_args.push_back("--classpath");
+                d8_args.push_back(fs::absolute(jar).string());
+            }
+
             for (const auto& cls : family_classes) {
                 d8_args.push_back(cls);
             }

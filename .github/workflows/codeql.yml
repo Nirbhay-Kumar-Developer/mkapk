@@ -3,9 +3,9 @@ name: "CodeQL Advanced & Linting Pipeline"
 
 "on":
   push:
-    branches: ["main"]
+    branches: ["Dependency-Resolver"]
   pull_request:
-    branches: ["main"]
+    branches: ["Dependency-Resolver"]
   schedule:
     - cron: '18 21 * * 2'
 
@@ -129,4 +129,3 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'megalinter-reports/megalinter-report.sarif'
-          

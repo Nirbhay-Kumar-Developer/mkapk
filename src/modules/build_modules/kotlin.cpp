@@ -21,7 +21,8 @@ Result<void> compile_incremental_kotlin(
     const std::vector<fs::path>& changed_files,
     RunFunc run_func,
     const std::string& compose_plugin,
-    bool is_release) 
+    bool is_release,
+    const std::vector<std::string>& classpath_extra) 
 {
     if (changed_files.empty()) return Result<void>::success();
 
@@ -59,13 +60,20 @@ Result<void> compile_incremental_kotlin(
         }
     }
 
+    // 4. Resolved Maven AAR/JAR Extracted Classpaths (Crucial for androidx/lifecycleScope/etc.)
+    for (const auto& extra : classpath_extra) {
+        if (!extra.empty()) {
+            add_to_cp(fs::path(extra));
+        }
+    }
+
     // Assemble the delimited classpath string
     std::string classpath = "";
     for (size_t i = 0; i < cp_components.size(); ++i) {
         classpath += cp_components[i] + (i == cp_components.size() - 1 ? "" : ":");
     }
 
-    // 4. Base Compiler Flags (Targeting JVM 17 for modern runtime compatibility)
+    // 5. Base Compiler Flags (Targeting JVM 17 for modern runtime compatibility)
     std::vector<std::string> args = {
         KOTLINC,
         "-jvm-target", "17",
@@ -74,7 +82,7 @@ Result<void> compile_incremental_kotlin(
         "-d", fs::absolute(classes_dir).string()
     };
 
-    // 5. Automated Release Bytecode Stripping
+    // 6. Automated Release Bytecode Stripping
     // Drops runtime parameter null-checks (checkNotNullParameter), cutting code size
     if (is_release) {
         args.push_back("-Xno-param-assertions");
@@ -82,7 +90,7 @@ Result<void> compile_incremental_kotlin(
         args.push_back("-nowarn");
     }
 
-    // 6. Jetpack Compose Compiler Plugin Integration
+    // 7. Jetpack Compose Compiler Plugin Integration
     if (!compose_plugin.empty()) {
         fs::path plugin_path = fs::path(compose_plugin);
         if (fs::exists(plugin_path)) {
@@ -92,7 +100,7 @@ Result<void> compile_incremental_kotlin(
         }
     }
 
-    // 7. Auto-Detect and Enable Standard Kotlin Compiler Plugins (Parcelize & Serialization)
+    // 8. Auto-Detect and Enable Standard Kotlin Compiler Plugins (Parcelize & Serialization)
     const char* prefix_env = std::getenv("PREFIX");
     fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
 
@@ -106,7 +114,7 @@ Result<void> compile_incremental_kotlin(
         args.push_back("-Xplugin=" + fs::absolute(serialization_plugin).string());
     }
 
-    // 8. Write source file paths to an arg-file (@kotlin_sources.txt) to avoid OS ARG_MAX limits
+    // 9. Write source file paths to an arg-file (@kotlin_sources.txt) to avoid OS ARG_MAX limits
     fs::path sources_list_file = classes_dir / "kotlin_sources.txt";
     std::ofstream f(sources_list_file);
     if (f.is_open()) {
@@ -123,4 +131,28 @@ Result<void> compile_incremental_kotlin(
     if (res.is_err()) return res;
     
     return Result<void>::success();
+}
+
+Result<void> compile_kotlin(
+    const std::string& KOTLINC,
+    const fs::path& android_jar,
+    const fs::path& classes_dir,
+    const fs::path& src_dir,
+    RunFunc run_func,
+    const std::string& compose_plugin) 
+{
+    std::vector<fs::path> kt_files;
+    if (!fs::exists(src_dir)) {
+        return Result<void>::error("Kotlin workspace tracking directory missing from context layout: " + src_dir.string());
+    }
+
+    for (const auto& entry : fs::recursive_directory_iterator(src_dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".kt") {
+            kt_files.push_back(entry.path());
+        }
+    }
+
+    if (kt_files.empty()) return Result<void>::success();
+
+    return compile_incremental_kotlin(KOTLINC, android_jar, classes_dir, kt_files, run_func, compose_plugin, false, {});
 }

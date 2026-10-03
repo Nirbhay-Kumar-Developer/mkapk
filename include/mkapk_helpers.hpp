@@ -44,11 +44,11 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
     std::map<std::string, std::vector<fs::path>>& changed_files,
     std::map<std::string, std::vector<fs::path>>& deleted_files,
     bool do_res,
-    RunFunc run
+    RunFunc run,
+    const std::vector<fs::path>& extra_jvm_classpaths = {}
 );
 
 Result<void> start_daemon(const std::string& classpath);
-
 void stop_daemon();
 const std::vector<std::string>& get_last_daemon_output();
 Result<void> call_java_tool(const std::vector<std::string>& args);
