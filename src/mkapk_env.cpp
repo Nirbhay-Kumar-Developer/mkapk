@@ -85,7 +85,8 @@ namespace MkapkEnv {
             config.manifest       = j.value("MANIFEST", "AndroidManifest.xml");
             
             config.sdk_root       = j.value("SDK_ROOT", "/data/data/com.termux/files/home/android-sdk/Sdk");
-            config.target_sdk     = j.value("TARGET_SDK", "33");
+            config.target_sdk     = j.value("TARGET_SDK", "36");
+            config.min_sdk        = j.value("MIN_SDK","21");
             config.java_version   = j.value("JAVA_VERSION", "17");
             config.compose_plugin = j.value("COMPOSE_PLUGIN", "");
             config.proguard_rules = j.value("PROGUARD_RULES", "proguard-rules.pro");

@@ -32,7 +32,9 @@ static std::string resolve_cached_manifest_path(const fs::path& aar_path) {
 bool merge_manifests(
     const std::string& main_manifest,
     const std::string& output_manifest,
-    const std::vector<std::string>& resolved_paths) 
+    const std::vector<std::string>& resolved_paths,
+    const std::string& min_sdk,
+    const std::string& target_sdk) 
 {
     UI::stage("Manifest Merger", "Merging library manifests with the primary AndroidManifest.xml");
 
@@ -45,7 +47,6 @@ bool merge_manifests(
     }
     target_manifests.push_back(fs::absolute(primary_path).string());
 
-    // Use a intermediate temp path in internal Termux memory to avoid /storage/emulated/0 write locks
     fs::path final_output_path(output_manifest);
     fs::create_directories(final_output_path.parent_path());
     
@@ -65,16 +66,15 @@ bool merge_manifests(
         }
     }
 
-    std::stringstream ss;
-    ss << "manifestmerger";
-    for (const auto& item : target_manifests) {
-        ss << "|" << item;
-    }
+    // Build IPC argument vector passing SDK values as first tokens
+    std::vector<std::string> daemon_args = {
+        "manifestmerger",
+        "--min-sdk", min_sdk,
+        "--target-sdk", target_sdk
+    };
 
-    std::vector<std::string> daemon_args;
-    std::string arg;
-    while (std::getline(ss, arg, '|')) {
-        daemon_args.push_back(arg);
+    for (const auto& item : target_manifests) {
+        daemon_args.push_back(item);
     }
 
     try {
@@ -84,7 +84,6 @@ bool merge_manifests(
         return false;
     }
 
-    // Copy from internal temp storage to target output path
     if (fs::exists(temp_output_path) && fs::file_size(temp_output_path) > 0) {
         std::error_code ec;
         fs::copy_file(temp_output_path, final_output_path, fs::copy_options::overwrite_existing, ec);
@@ -97,5 +96,4 @@ bool merge_manifests(
         return false;
     }
 }
-
 } // namespace MkapkManifestMerger

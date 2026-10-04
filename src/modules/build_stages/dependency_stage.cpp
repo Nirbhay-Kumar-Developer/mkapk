@@ -69,21 +69,23 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
     bool manifest_src_changed = ctx.diff.manifest_changed;
     bool merged_manifest_missing = !fs::exists(merged_manifest_output);
 
-    if (manifest_src_changed || deps_config_changed || merged_manifest_missing || ctx.force_all) {
+        if (manifest_src_changed || deps_config_changed || merged_manifest_missing || ctx.force_all) {
         bool merge_success = MkapkManifestMerger::merge_manifests(
             ctx.manifest_path.string(), 
             merged_manifest_output.string(), 
-            ctx.all_resolved_artifacts
+            ctx.all_resolved_artifacts,
+            config.min_sdk,
+            config.target_sdk
         );
 
         if (merge_success) {
             ctx.active_manifest_path = merged_manifest_output;
         } else {
-            UI::warn("Manifest integration anomaly caught. Falling back to primary configuration file layout.");
+            return Result<void>::error("Manifest merger failed. Check library dependencies and AndroidManifest.xml formatting.");
         }
     } else {
         ctx.active_manifest_path = merged_manifest_output;
     }
-
+    
     return Result<void>::success();
 }

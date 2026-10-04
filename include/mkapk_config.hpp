@@ -26,6 +26,7 @@ struct MkapkConfig {
     // SDK & Compilation
     std::string sdk_root;
     std::string target_sdk;
+    std::string min_sdk;
     std::string java_version;
     std::string compose_plugin;
     std::string proguard_rules;

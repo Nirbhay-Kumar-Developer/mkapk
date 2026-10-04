@@ -18,7 +18,9 @@ namespace MkapkManifestMerger {
     bool merge_manifests(
         const std::string& main_manifest,
         const std::string& output_manifest,
-        const std::vector<std::string>& resolved_paths
+        const std::vector<std::string>& resolved_paths,
+        const std::string& target_sdk,
+        const std::string& min_sdk
     );
 }
 
