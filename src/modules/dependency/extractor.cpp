@@ -43,9 +43,14 @@ bool extract_aar(const std::string& aar_path) {
     fs::path dest_dir = aar.parent_path();
     std::string lib_identifier = aar.stem().string();
 
-    // Fast Skip: Check if extracted components already exist on disk[span_8](start_span)[span_8](end_span)
-    if (fs::exists(dest_dir / "AndroidManifest.xml") && fs::exists(dest_dir / "classes.jar")) {
-        return true; 
+    // Check if extracted components already exist on disk including res if present
+    if (fs::exists(dest_dir / "AndroidManifest.xml") && 
+        fs::exists(dest_dir / "classes.jar") &&
+        (!fs::exists(dest_dir / "res") || fs::is_directory(dest_dir / "res"))) {
+        // Only skip if the extraction marker exists
+        if (fs::exists(dest_dir / ".extracted")) {
+            return true;
+        }
     }
 
     UI::stage("Extracting AAR", lib_identifier);
@@ -98,6 +103,8 @@ bool extract_aar(const std::string& aar_path) {
         return false;
     }
 
+    // Touch completion marker
+    std::ofstream(dest_dir / ".extracted").close();
     return true;
 }
 

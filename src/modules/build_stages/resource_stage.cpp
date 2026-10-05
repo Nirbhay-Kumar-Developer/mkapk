@@ -6,23 +6,36 @@
 namespace fs = std::filesystem;
 
 Result<void> ResourceStage::execute(const MkapkConfig& config, PipelineContext& ctx) {
-    bool needs_compile = ctx.diff.res_changed || ctx.force_all;
-    bool needs_link = ctx.diff.needs_manifest_relink || ctx.force_all || !fs::exists(ctx.build_dir / "unsigned.apk");
-
-    if (!needs_compile && !needs_link) {
-        return Result<void>::success();
-    }
+    fs::path flat_dir = ctx.build_dir / "flat_res";
+    fs::create_directories(flat_dir);
 
     // 1. Gather all extracted AAR dependency resource folders
     std::vector<fs::path> lib_res_dirs;
+    bool missing_flata = false;
+
     for (const auto& path : ctx.all_resolved_artifacts) {
         fs::path file_path(path);
         if (file_path.extension() == ".aar") {
             fs::path ext_res = file_path.parent_path() / "res";
             if (fs::exists(ext_res) && !fs::is_empty(ext_res)) {
                 lib_res_dirs.push_back(ext_res);
+                
+                std::string lib_name = ext_res.parent_path().parent_path().filename().string();
+                std::string lib_version = ext_res.parent_path().filename().string();
+                fs::path lib_out_arc = flat_dir / (lib_name + "_" + lib_version + ".flata");
+                
+                if (!fs::exists(lib_out_arc)) {
+                    missing_flata = true;
+                }
             }
         }
+    }
+
+    bool needs_compile = ctx.diff.res_changed || ctx.force_all || missing_flata;
+    bool needs_link = ctx.diff.needs_manifest_relink || ctx.force_all || !fs::exists(ctx.build_dir / "unsigned.apk");
+
+    if (!needs_compile && !needs_link) {
+        return Result<void>::success();
     }
 
     // 2. Compile modified or all resources into .flat / .flata files
