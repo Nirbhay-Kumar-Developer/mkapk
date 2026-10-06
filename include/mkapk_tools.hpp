@@ -157,7 +157,8 @@ Result<void> run_dex_r8(
     const MkapkConfig& config,
     const fs::path& bin_dir,
     RunFunc run_func,
-    bool no_obs = false
+    bool no_obs = false,
+    const std::vector<fs::path>& extra_dependency_jars = {}
 );
 
 Result<void> run_dex_d8(

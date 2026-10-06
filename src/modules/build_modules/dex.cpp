@@ -111,7 +111,8 @@ Result<void> run_dex_r8(
     const MkapkConfig& config,
     const fs::path& bin_dir,
     RunFunc run_func,
-    bool no_obs)
+    bool no_obs,
+    const std::vector<fs::path>& extra_dependency_jars)
 {
     fs::path bin_dir_path = fs::absolute(bin_dir);
     std::vector<std::string> class_files = get_all_class_files(bin_dir_path);
@@ -127,7 +128,7 @@ Result<void> run_dex_r8(
     std::vector<std::string> args = {
         R8_TOOL,
         "--release",
-        "--min-api", "21", // Automates Java 8+ language feature desugaring
+        "--min-api", "21",
         "--lib", fs::absolute(android_jar).string(),
         "--output", bin_dir_path.string()
     };
@@ -138,14 +139,14 @@ Result<void> run_dex_r8(
     }
 
     if (!no_obs) {
-        // 1. AAPT2-Generated Keep Rules (Manifest components, XML layouts, custom views)
+        // 1. AAPT2 Keep Rules
         fs::path aapt_rules = bin_dir_path / "aapt_rules.pro";
         if (fs::exists(aapt_rules)) {
             args.push_back("--pg-conf");
             args.push_back(aapt_rules.string());
         }
 
-        // 2. User-Defined ProGuard Rules
+        // 2. User ProGuard Rules
         if (!config.proguard_rules.empty()) {
             fs::path pg_rules = fs::absolute(MkapkEnv::resolve_path(config.proguard_rules));
             if (fs::exists(pg_rules)) {
@@ -156,25 +157,34 @@ Result<void> run_dex_r8(
             }
         }
 
-        // 3. Automated Obfuscation Symbol Map Export
+        // 3. Mapping output
         fs::path mapping_file = bin_dir_path / "mapping.txt";
         args.push_back("--pg-map-output");
         args.push_back(mapping_file.string());
     }
 
-    // 4. Batch class files into an arg-file to prevent CLI argument length limits
+    // 4. Batch all app class files AND dependency JARs into r8_inputs.txt
     fs::path input_list_file = bin_dir_path / "r8_inputs.txt";
     std::ofstream input_file(input_list_file);
     if (input_file.is_open()) {
         for (const auto& file : class_files) {
             input_file << file << "\n";
         }
+        for (const auto& dep_jar : extra_dependency_jars) {
+            if (fs::exists(dep_jar)) {
+                input_file << fs::absolute(dep_jar).string() << "\n";
+            }
+        }
         input_file.close();
         args.push_back("@" + input_list_file.string());
     } else {
-        // Fallback to inline args if file write fails
         for (const auto& file : class_files) {
             args.push_back(file);
+        }
+        for (const auto& dep_jar : extra_dependency_jars) {
+            if (fs::exists(dep_jar)) {
+                args.push_back(fs::absolute(dep_jar).string());
+            }
         }
     }
 

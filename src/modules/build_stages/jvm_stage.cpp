@@ -56,12 +56,20 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
         return Result<void>::success();
     }
 
-    // 4. Release Mode: R8 Whole-Program Optimization & Tree Shaking
+        // 4. Release Mode: R8 Whole-Program Optimization & Tree Shaking
     if (ctx.is_release) {
         UI::stage(UI::Msg::STAGE_MINIFY, UI::Msg::OP_R8_OPTIMIZE);
-        auto r8_res = run_dex_r8(ctx.tools["r8"], ctx.android_jar, config, ctx.build_dir, ctx.run_func, false);
+        auto r8_res = run_dex_r8(
+            ctx.tools["r8"], 
+            ctx.android_jar, 
+            config, 
+            ctx.build_dir, 
+            ctx.run_func, 
+            false, 
+            extra_jvm_classpaths
+        );
         if (r8_res.is_err()) return r8_res;
-    } 
+    }
     // 5. Debug Mode: Incremental D8 Translation & Merge
     else {
         UI::stage(UI::Msg::STAGE_DEX);
