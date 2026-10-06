@@ -4,6 +4,9 @@
 #include <filesystem>
 #include <algorithm>
 #include <functional>
+#include <set>
+#include <fstream>
+#include <sstream>
 #include "mkapk_helpers.hpp"
 #include "mkapk_ui.hpp"
 
@@ -122,6 +125,66 @@ Result<void> link_manifest(
         "--proguard", fs::absolute(aapt_proguard_rules).string(),
         "--output-text-symbols", fs::absolute(r_txt_symbols).string()
     };
+
+    // --- DISCOVER AND INJECT EXTRA PACKAGES FOR R.JAVA GENERATION ---
+    std::set<std::string> extra_packages;
+    const char* prefix_env = std::getenv("PREFIX");
+    fs::path cache_root = prefix_env 
+        ? fs::path(prefix_env) / "var/lib/mkapk/lib" 
+        : fs::path("/data/data/com.termux/files/usr/var/lib/mkapk/lib");
+
+    // Extract the primary app package to avoid adding it to --extra-packages
+    std::string primary_package = "";
+    if (fs::exists(manifest)) {
+        std::ifstream mf(manifest);
+        std::string line;
+        while (std::getline(mf, line)) {
+            size_t pkg_pos = line.find("package=\"");
+            if (pkg_pos != std::string::npos) {
+                size_t start = pkg_pos + 9;
+                size_t end = line.find("\"", start);
+                if (end != std::string::npos) {
+                    primary_package = line.substr(start, end - start);
+                }
+                break;
+            }
+        }
+    }
+
+    if (fs::exists(cache_root)) {
+        for (const auto& entry : fs::recursive_directory_iterator(cache_root)) {
+            if (entry.is_regular_file() && entry.path().filename() == "AndroidManifest.xml") {
+                std::ifstream lib_mf(entry.path());
+                std::string line;
+                while (std::getline(lib_mf, line)) {
+                    size_t pkg_pos = line.find("package=\"");
+                    if (pkg_pos != std::string::npos) {
+                        size_t start = pkg_pos + 9;
+                        size_t end = line.find("\"", start);
+                        if (end != std::string::npos) {
+                            std::string pkg = line.substr(start, end - start);
+                            if (!pkg.empty() && pkg != primary_package) {
+                                extra_packages.insert(pkg);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!extra_packages.empty()) {
+        std::string extra_pkgs_str = "";
+        for (auto it = extra_packages.begin(); it != extra_packages.end(); ++it) {
+            extra_pkgs_str += *it;
+            if (std::next(it) != extra_packages.end()) {
+                extra_pkgs_str += ":";
+            }
+        }
+        args.push_back("--extra-packages");
+        args.push_back(extra_pkgs_str);
+    }
 
     if (debug) {
         args.push_back("--debug-mode");
