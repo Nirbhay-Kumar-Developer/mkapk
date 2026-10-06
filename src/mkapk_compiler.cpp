@@ -115,32 +115,6 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
         classpath_extra_strs.push_back(fs::absolute(p).string());
     }
 
-    // --- PHASE 0: EXTRACT KOTLIN STANDARD LIBRARY ---
-    if (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty()) {
-        const char* prefix_env = std::getenv("PREFIX");
-        fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
-        fs::path stdlib_jar = kotlin_lib_root / "kotlin-stdlib.jar";
-
-        if (fs::exists(stdlib_jar)) {
-            if (!fs::exists(java_out / "kotlin/Unit.class")) {
-                std::vector<std::string> unzip_args = {
-                    "unzip", "-q", "-o", 
-                    stdlib_jar.string(), 
-                    "-d", java_out.string()
-                };
-                
-                auto unzip_res = run(unzip_args, "Failed to extract Kotlin standard library elements.");
-                if (unzip_res.is_ok()) {
-                    fs::remove_all(java_out / "META-INF");
-                } else {
-                    UI::warn("Stdlib unpack notice: " + unzip_res.get_error());
-                }
-            }
-        } else {
-            UI::warn("Kotlin runtime validation failure: Standard library jar not located inside prefix location");
-        }
-    }
-
     // --- PHASE 1: PRE-COLLECT ALL JAVA REFERENCE STUBS ---
     std::vector<fs::path> unified_java_sources;
     if (changed_files.find("java") != changed_files.end()) {

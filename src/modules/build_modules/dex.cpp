@@ -170,9 +170,13 @@ Result<void> run_dex_r8(
         for (const auto& file : class_files) {
             input_file << file << "\n";
         }
+        std::set<std::string> seen_jars;
         for (const auto& dep_jar : extra_dependency_jars) {
             if (fs::exists(dep_jar)) {
-                input_file << fs::absolute(dep_jar).string() << "\n";
+                std::string abs_jar = fs::absolute(dep_jar).string();
+                if (seen_jars.insert(abs_jar).second) {
+                    input_file << abs_jar << "\n";
+                }
             }
         }
         input_file.close();
