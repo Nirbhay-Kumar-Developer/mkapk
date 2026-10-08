@@ -16,6 +16,8 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #include <stdexcept>
+#include <set>
+#include <cstdlib>
 
 namespace fs = std::filesystem;
 
@@ -50,13 +52,15 @@ std::string trim_token(const std::string& str) {
  * Automatically fetches configured .so libraries from Termux's localized 
  * ndk-multilib distribution tree, enabling seamless cross-compilation for all ABIs.
  */
+
 void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_dir, const std::vector<std::string>& arch_list) {
-    // Direct lookup from the pre-parsed configuration object array vector!
     std::vector<std::string> targeted_libs = config.system_shared_libs;
-    
-    fs::path termux_usr_dir = "/data/data/com.termux/files/usr";
-    fs::path termux_global_lib = "/data/data/com.termux/files/usr/lib";
-    
+
+    const char* prefix_env = std::getenv("PREFIX");
+    fs::path termux_usr_dir = prefix_env ? fs::path(prefix_env) : fs::path("/data/data/com.termux/files/usr");
+    fs::path termux_global_lib = termux_usr_dir / "lib";
+    fs::path mkapk_cache_lib = termux_usr_dir / "var/lib/mkapk/lib";
+
     std::map<std::string, std::string> arch_to_abi_map = {
         {"aarch64-linux-android", "arm64-v8a"},
         {"armv7a-linux-androideabi", "armeabi-v7a"},
@@ -88,30 +92,60 @@ void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_
 
         std::string abi_name = arch_to_abi_map.count(arch) ? arch_to_abi_map[arch] : "unknown";
         std::string sysroot_folder = arch_to_sysroot_folder.count(arch) ? arch_to_sysroot_folder[arch] : "unknown";
-        
+
         if (abi_name == "unknown" || sysroot_folder == "unknown") continue;
 
         fs::path target_abi_dir = bin_dir / "lib" / abi_name;
         fs::create_directories(target_abi_dir);
 
         bool is_host_match = (abi_name == host_abi);
+        std::set<std::string> copied_libs;
 
+        // PHASE 1: Auto-place native shared libraries (.so) bundled in AAR dependencies
+         if (fs::exists(mkapk_cache_lib)) {
+            for (const auto& entry : fs::recursive_directory_iterator(mkapk_cache_lib)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".so") {
+                    // Check if file is inside a jni/<abi_name> folder of an extracted AAR
+                    fs::path parent_abi = entry.path().parent_path().filename();
+                    fs::path parent_jni = entry.path().parent_path().parent_path().filename();
+
+                    if (parent_abi == abi_name && parent_jni == "jni") {
+                        std::string so_name = entry.path().filename().string();
+                        try {
+                            fs::copy_file(entry.path(), target_abi_dir / so_name, fs::copy_options::overwrite_existing);
+                            copied_libs.insert(so_name);
+                            UI::info(UI::Msg::OP_LIB_AUTOPLACED + "[" + abi_name + "] " + so_name + " (from dependency)");
+                        } catch (const fs::filesystem_error& e) {
+                            UI::error("Failed to copy AAR native dependency: " + so_name + " to " + abi_name, e.what());
+                        }
+                    }
+                }
+            }
+        }
+
+        // PHASE 2: Resolve and place configured system_shared_libs
         for (const std::string& lib_base_raw : targeted_libs) {
             std::string lib_base = trim_token(lib_base_raw);
             if (lib_base.empty()) continue;
 
-            std::string filename = "lib" + lib_base + ".so";
+            std::string filename = (lib_base.rfind("lib", 0) == 0) ? (lib_base + ".so") : ("lib" + lib_base + ".so");
+
+            // Skip if this library was already extracted from an AAR dependency
+            if (copied_libs.count(filename) || fs::exists(target_abi_dir / filename)) {
+                continue;
+            }
+
             fs::path source_file;
             bool found = false;
 
-            // STRATEGY 1: Dynamically scan Termux's multilib triple paths for ANY configured library
+            // STRATEGY 1: Dynamically scan Termux's multilib triple paths
             fs::path multilib_target = termux_usr_dir / sysroot_folder / "lib" / filename;
             if (fs::exists(multilib_target)) {
                 source_file = multilib_target;
                 found = true;
             }
 
-            // STRATEGY 2: Fallback check against native host paths if compiling for the active device ABI
+            // STRATEGY 2: Fallback check against native host paths if compiling for active device ABI
             if (!found && is_host_match) {
                 fs::path host_target = termux_global_lib / filename;
                 if (fs::exists(host_target)) {
@@ -132,7 +166,9 @@ void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_
             // Execution Phase
             if (found) {
                 try {
-                    fs::copy_file(source_file, target_abi_dir / filename, fs::copy_options::overwrite_existing);
+                    // Resolve symlinks to physical binaries before copying
+                    fs::path resolved_source = fs::is_symlink(source_file) ? fs::canonical(source_file) : source_file;
+                    fs::copy_file(resolved_source, target_abi_dir / filename, fs::copy_options::overwrite_existing);
                     UI::info(UI::Msg::OP_LIB_AUTOPLACED + "[" + abi_name + "] " + filename);
                 } catch (const fs::filesystem_error& e) {
                     UI::error("Failed to copy library dependency: " + filename + " to " + abi_name, e.what());

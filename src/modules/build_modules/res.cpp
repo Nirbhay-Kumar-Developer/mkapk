@@ -7,6 +7,7 @@
 #include <set>
 #include <fstream>
 #include <sstream>
+#include <map>
 #include "mkapk_helpers.hpp"
 #include "mkapk_ui.hpp"
 
@@ -126,14 +127,7 @@ Result<void> link_manifest(
         "--output-text-symbols", fs::absolute(r_txt_symbols).string()
     };
 
-    // --- DISCOVER AND INJECT EXTRA PACKAGES FOR R.JAVA GENERATION ---
-    std::set<std::string> extra_packages;
-    const char* prefix_env = std::getenv("PREFIX");
-    fs::path cache_root = prefix_env 
-        ? fs::path(prefix_env) / "var/lib/mkapk/lib" 
-        : fs::path("/data/data/com.termux/files/usr/var/lib/mkapk/lib");
-
-    // Extract the primary app package to avoid adding it to --extra-packages
+    // 1. Discover primary application package
     std::string primary_package = "";
     if (fs::exists(manifest)) {
         std::ifstream mf(manifest);
@@ -151,29 +145,50 @@ Result<void> link_manifest(
         }
     }
 
+    // 2. Discover library packages and their corresponding R.txt files
+    std::set<std::string> extra_packages;
+    std::vector<std::string> library_r_txt_files;
+
+    const char* prefix_env = std::getenv("PREFIX");
+    fs::path cache_root = prefix_env 
+        ? fs::path(prefix_env) / "var/lib/mkapk/lib" 
+        : fs::path("/data/data/com.termux/files/usr/var/lib/mkapk/lib");
+
     if (fs::exists(cache_root)) {
         for (const auto& entry : fs::recursive_directory_iterator(cache_root)) {
             if (entry.is_regular_file() && entry.path().filename() == "AndroidManifest.xml") {
+                fs::path lib_dir = entry.path().parent_path();
+                
+                // Read package declaration
                 std::ifstream lib_mf(entry.path());
                 std::string line;
+                std::string pkg = "";
                 while (std::getline(lib_mf, line)) {
                     size_t pkg_pos = line.find("package=\"");
                     if (pkg_pos != std::string::npos) {
                         size_t start = pkg_pos + 9;
                         size_t end = line.find("\"", start);
                         if (end != std::string::npos) {
-                            std::string pkg = line.substr(start, end - start);
-                            if (!pkg.empty() && pkg != primary_package) {
-                                extra_packages.insert(pkg);
-                            }
+                            pkg = line.substr(start, end - start);
                         }
                         break;
                     }
+                }
+
+                if (!pkg.empty() && pkg != primary_package) {
+                    extra_packages.insert(pkg);
+                }
+
+                // Check for library symbol table (R.txt)
+                fs::path lib_r_txt = lib_dir / "R.txt";
+                if (fs::exists(lib_r_txt) && fs::file_size(lib_r_txt) > 0) {
+                    library_r_txt_files.push_back(fs::absolute(lib_r_txt).string());
                 }
             }
         }
     }
 
+    // 3. Inject --extra-packages
     if (!extra_packages.empty()) {
         std::string extra_pkgs_str = "";
         for (auto it = extra_packages.begin(); it != extra_packages.end(); ++it) {
@@ -192,9 +207,8 @@ Result<void> link_manifest(
         args.push_back("--enable-sparse-encoding");
     }
 
+    // 4. Collect project resource files and compiled library archives (.flata)
     std::vector<std::string> library_archives;
-
-    // Route AAR compiled library trees to the -R flag, while keeping app resources positional
     for (const auto& entry : fs::directory_iterator(flat_dir)) {
         if (entry.is_regular_file()) {
             std::string ext = entry.path().extension().string();
@@ -206,16 +220,16 @@ Result<void> link_manifest(
         }
     }
 
-    // Sort library archives for deterministic merging order
     std::sort(library_archives.begin(), library_archives.end());
+    std::sort(library_r_txt_files.begin(), library_r_txt_files.end());
 
-    // Inject the -R flags to merge AAR library resources
+    // Inject compiled library resources via -R
     for (const auto& arc : library_archives) {
         args.push_back("-R");
         args.push_back(arc);
     }
 
-    auto res = run_func(args, "Manifest asset linking generation dropped errors.");
+    auto res = run_func(args, "Errors merging manifest");
     if (res.is_err()) return res;
 
     return Result<void>::success();

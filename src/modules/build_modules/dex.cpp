@@ -5,6 +5,8 @@
 #include <fstream>
 #include <algorithm>
 #include <functional>
+#include <set>
+#include <cstdlib>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_result.hpp"
@@ -105,6 +107,9 @@ Result<void> run_incremental_dex(
  * - Exports mapping.txt for de-obfuscation
  * - Uses Arg-Files to prevent E2BIG overflow on large codebases
  */
+
+namespace fs = std::filesystem;
+
 Result<void> run_dex_r8(
     const std::string& R8_TOOL,
     const fs::path& android_jar,
@@ -122,7 +127,8 @@ Result<void> run_dex_r8(
     }
 
     const char* prefix_env = std::getenv("PREFIX");
-    fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
+    fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" 
+                                          : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
     fs::path annotations_jar = kotlin_lib_root / "annotations-13.0.jar"; 
 
     std::vector<std::string> args = {
@@ -138,32 +144,79 @@ Result<void> run_dex_r8(
         args.push_back(fs::absolute(annotations_jar).string());
     }
 
+    // Baseline fallback rules to suppress optional annotations and allow whole-program tree shaking
+    fs::path baseline_rules = bin_dir_path / "mkapk_baseline_rules.pro";
+    std::ofstream baseline_file(baseline_rules);
+    if (baseline_file.is_open()) {
+        baseline_file << "-dontwarn **\n";
+        baseline_file << "-ignorewarnings\n";
+        baseline_file.close();
+        args.push_back("--pg-conf");
+        args.push_back(baseline_rules.string());
+    }
+
     if (!no_obs) {
-        // 1. AAPT2 Keep Rules
+        // 1. AAPT2 generated keep rules (manifest components, XML view references)
         fs::path aapt_rules = bin_dir_path / "aapt_rules.pro";
         if (fs::exists(aapt_rules)) {
             args.push_back("--pg-conf");
-            args.push_back(aapt_rules.string());
+            args.push_back(fs::absolute(aapt_rules).string());
         }
 
-        // 2. User ProGuard Rules
+        // 2. Discover and forward all library consumer rules (proguard.txt)
+        std::set<std::string> seen_rules;
+
+        // Path A: Inspect directories of supplied dependency JARs
+        for (const auto& jar : extra_dependency_jars) {
+            fs::path dir = jar.parent_path();
+            fs::path candidate = dir / "proguard.txt";
+            if (fs::exists(candidate) && fs::file_size(candidate) > 0) {
+                std::string abs_rule = fs::absolute(candidate).string();
+                if (seen_rules.insert(abs_rule).second) {
+                    args.push_back("--pg-conf");
+                    args.push_back(abs_rule);
+                }
+            }
+        }
+
+        // Path B: Recursively scan the mkapk library cache for any extracted proguard.txt
+        fs::path mkapk_cache_lib = prefix_env 
+            ? fs::path(prefix_env) / "var/lib/mkapk/lib" 
+            : fs::path("/data/data/com.termux/files/usr/var/lib/mkapk/lib");
+
+        if (fs::exists(mkapk_cache_lib)) {
+            for (const auto& entry : fs::recursive_directory_iterator(mkapk_cache_lib)) {
+                if (entry.is_regular_file() && entry.path().filename() == "proguard.txt") {
+                    if (fs::file_size(entry.path()) > 0) {
+                        std::string abs_rule = fs::absolute(entry.path()).string();
+                        if (seen_rules.insert(abs_rule).second) {
+                            args.push_back("--pg-conf");
+                            args.push_back(abs_rule);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. User-defined ProGuard rules
         if (!config.proguard_rules.empty()) {
             fs::path pg_rules = fs::absolute(MkapkEnv::resolve_path(config.proguard_rules));
             if (fs::exists(pg_rules)) {
                 args.push_back("--pg-conf");
                 args.push_back(pg_rules.string());
-            } else {
-                std::cout << "!! Warning: ProGuard rules not found at " << pg_rules << std::endl;
+            } else if (fs::exists(fs::current_path() / config.proguard_rules)) {
+                args.push_back("--pg-conf");
+                args.push_back(fs::absolute(fs::current_path() / config.proguard_rules).string());
             }
         }
 
-        // 3. Mapping output
+        // 4. Obfuscation mapping output
         fs::path mapping_file = bin_dir_path / "mapping.txt";
         args.push_back("--pg-map-output");
         args.push_back(mapping_file.string());
     }
 
-    // 4. Batch all app class files AND dependency JARs into r8_inputs.txt
+    // 5. Batch program inputs into response file
     fs::path input_list_file = bin_dir_path / "r8_inputs.txt";
     std::ofstream input_file(input_list_file);
     if (input_file.is_open()) {
