@@ -1,28 +1,27 @@
 package com.mkapk.tools;
 
+import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
+import org.eclipse.aether.DefaultRepositorySystemSession;
+import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.artifact.Artifact;
+import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.artifact.DefaultArtifactType;
+import org.eclipse.aether.collection.CollectRequest;
+import org.eclipse.aether.graph.Dependency;
+import org.eclipse.aether.graph.DependencyFilter;
+import org.eclipse.aether.repository.LocalRepository;
+import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.resolution.ArtifactResult;
+import org.eclipse.aether.resolution.DependencyRequest;
+import org.eclipse.aether.resolution.DependencyResult;
+import org.eclipse.aether.util.artifact.DefaultArtifactTypeRegistry;
+import org.eclipse.aether.util.artifact.JavaScopes;
+import org.eclipse.aether.util.filter.DependencyFilterUtils;
+
 import java.io.File;
 import java.io.PrintStream;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
-
-import org.eclipse.aether.RepositorySystem;
-import org.eclipse.aether.RepositorySystemSession;
-import org.eclipse.aether.artifact.Artifact;
-import org.eclipse.aether.artifact.DefaultArtifact;
-import org.eclipse.aether.collection.CollectRequest;
-import org.eclipse.aether.collection.CollectResult;
-import org.eclipse.aether.collection.DependencyCollectionException;
-import org.eclipse.aether.graph.Dependency;
-import org.eclipse.aether.graph.DependencyNode;
-import org.eclipse.aether.repository.RemoteRepository;
-import org.eclipse.aether.resolution.ArtifactRequest;
-import org.eclipse.aether.resolution.ArtifactResult;
-import org.eclipse.aether.util.artifact.JavaScopes;
-import org.eclipse.aether.util.graph.visitor.PreorderNodeListGenerator;
+import java.util.*;
 
 public class DependencyResolver implements ToolHandler {
 
@@ -33,12 +32,11 @@ public class DependencyResolver implements ToolHandler {
     }
 
     private static File getLocalCacheDir() {
-        String termuxPrefix = System.getenv("PREFIX");
-        if (termuxPrefix == null || termuxPrefix.isEmpty()) {
-            termuxPrefix = System.getProperty("user.home") + "/.mkapk";
+        String prefix = System.getenv("PREFIX");
+        if (prefix == null || prefix.isEmpty()) {
+            prefix = System.getProperty("user.home") + "/.mkapk";
         }
-        
-        File cacheDir = new File(termuxPrefix + "/var/lib/mkapk/lib");
+        File cacheDir = new File(prefix, "var/lib/mkapk/lib");
         if (!cacheDir.exists()) {
             cacheDir.mkdirs();
         }
@@ -46,114 +44,102 @@ public class DependencyResolver implements ToolHandler {
     }
 
     @Override
-    public boolean execute(String[] args, PrintStream outStream, PrintStream errStream) throws Exception {
+    public boolean execute(String[] args, PrintStream out, PrintStream err) throws Exception {
         if (args.length < 1) {
-            outStream.println("[ERROR]|Provide at least one maven coordinate");
+            out.println("[ERROR]|No coordinates supplied");
             return false;
         }
 
         RepositorySystem system = Booter.newRepositorySystem();
-        RepositorySystemSession session = Booter.newRepositorySystemSession(system, getLocalCacheDir());
+        
+        // 1. Construct Maven session and register proper artifact handlers for aar and jar
+        DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
+        LocalRepository localRepo = new LocalRepository(getLocalCacheDir());
+        session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
 
-        RemoteRepository googleRepo = new RemoteRepository.Builder("google", "default", "https://dl.google.com/dl/android/maven2/").build();
-        RemoteRepository centralRepo = new RemoteRepository.Builder("central", "default", "https://repo1.maven.org/maven2/").build();
-        List<RemoteRepository> repos = Arrays.asList(googleRepo, centralRepo);
+        DefaultArtifactTypeRegistry typeRegistry = new DefaultArtifactTypeRegistry();
+        // Crucial: define "aar" packaging type so transitive AARs resolve to their .aar binaries
+        typeRegistry.add(new DefaultArtifactType("aar", "aar", "", "java", false, true));
+        typeRegistry.add(new DefaultArtifactType("jar", "jar", "", "java", false, false));
+        session.setArtifactTypeRegistry(typeRegistry);
 
+        // 2. Configure Repositories
+        RemoteRepository google = new RemoteRepository.Builder("google", "default", "https://dl.google.com/dl/android/maven2/").build();
+        RemoteRepository central = new RemoteRepository.Builder("central", "default", "https://repo1.maven.org/maven2/").build();
+        List<RemoteRepository> repos = Arrays.asList(google, central);
+
+        // 3. Assemble CollectRequest
         CollectRequest collectRequest = new CollectRequest();
-        for (RemoteRepository repo : repos) {
-            collectRequest.addRepository(repo);
+        collectRequest.setRepositories(repos);
+
+        for (String raw : args) {
+            if (raw == null || raw.trim().isEmpty()) continue;
+            String coord = raw.trim();
+            collectRequest.addDependency(new Dependency(new DefaultArtifact(coord), JavaScopes.COMPILE));
         }
 
-        // Add root dependencies using standard G:A:V coordinates
-        for (String rawCoordinate : args) {
-            if (rawCoordinate == null || rawCoordinate.trim().isEmpty()) continue;
-            
-            String coord = rawCoordinate.trim();
-            // Normalize: If coordinate is group:artifact:version, keep as standard artifact
-            String[] parts = coord.split(":");
-            if (parts.length == 3) {
-                collectRequest.addDependency(new Dependency(new DefaultArtifact(parts[0], parts[1], "", "aar", parts[2]), JavaScopes.COMPILE));
+        // 4. Resolve dependencies transitively using DependencyRequest
+        // Exclude test and provided scopes cleanly
+        DependencyFilter classpathFilter = DependencyFilterUtils.classpathFilter(
+            JavaScopes.COMPILE,
+            JavaScopes.RUNTIME
+        );
+
+        DependencyRequest dependencyRequest = new DependencyRequest(collectRequest, classpathFilter);
+        DependencyResult dependencyResult;
+
+        try {
+            dependencyResult = system.resolveDependencies(session, dependencyRequest);
+        } catch (Exception e) {
+            out.println("[WARN]|Transitive resolution warning: " + e.getMessage());
+            // Attempt to retrieve partial results if graph resolution encountered an issue
+            if (e instanceof org.eclipse.aether.resolution.DependencyResolutionException) {
+                dependencyResult = ((org.eclipse.aether.resolution.DependencyResolutionException) e).getResult();
             } else {
-                collectRequest.addDependency(new Dependency(new DefaultArtifact(coord), JavaScopes.COMPILE));
+                dependencyResult = null;
             }
         }
 
-        CollectResult collectResult;
-        try {
-            collectResult = system.collectDependencies(session, collectRequest);
-        } catch (DependencyCollectionException e) {
-            collectResult = e.getResult();
-            outStream.println("[WARN]|Partial graph collection: " + e.getMessage());
-        }
-
-        if (collectResult == null || collectResult.getRoot() == null) {
-            outStream.println("MKAPK_RESOLVED");
+        if (dependencyResult == null || dependencyResult.getArtifactResults() == null) {
+            out.println("MKAPK_RESOLVED");
             return true;
         }
 
-        // Traverse the mediated graph to collect all transitive and direct nodes
-        PreorderNodeListGenerator nlg = new PreorderNodeListGenerator();
-        collectResult.getRoot().accept(nlg);
+        // 5. Collect and deduplicate resolved files (map GA to mediated version)
+        Map<String, File> mediatedArtifacts = new LinkedHashMap<>();
 
-        Set<File> resolvedFiles = new LinkedHashSet<>();
-        List<DependencyNode> nodes = nlg.getNodes();
+        for (ArtifactResult res : dependencyResult.getArtifactResults()) {
+            if (!res.isResolved() || res.getArtifact() == null) continue;
 
-        for (DependencyNode node : nodes) {
-            Dependency dep = node.getDependency();
-            if (dep == null || dep.getArtifact() == null) continue;
+            Artifact art = res.getArtifact();
+            File file = art.getFile();
+            if (file == null || !file.exists()) continue;
 
-            // Skip test or provided scopes
-            String scope = dep.getScope();
-            if (JavaScopes.TEST.equalsIgnoreCase(scope) || JavaScopes.PROVIDED.equalsIgnoreCase(scope)) {
-                continue;
-            }
-
-            Artifact art = dep.getArtifact();
-            File resolvedFile = null;
-
-            // 1. Try resolving as AAR
-            Artifact aarArtifact = new DefaultArtifact(art.getGroupId(), art.getArtifactId(), art.getClassifier(), "aar", art.getVersion());
-            try {
-                ArtifactResult aarRes = system.resolveArtifact(session, new ArtifactRequest(aarArtifact, repos, null));
-                if (aarRes.isResolved() && aarRes.getArtifact().getFile() != null) {
-                    resolvedFile = aarRes.getArtifact().getFile();
-                }
-            } catch (Exception ignored) {}
-
-            // 2. If no AAR is available, resolve as standard JAR
-            if (resolvedFile == null) {
-                Artifact jarArtifact = new DefaultArtifact(art.getGroupId(), art.getArtifactId(), art.getClassifier(), "jar", art.getVersion());
-                try {
-                    ArtifactResult jarRes = system.resolveArtifact(session, new ArtifactRequest(jarArtifact, repos, null));
-                    if (jarRes.isResolved() && jarRes.getArtifact().getFile() != null) {
-                        resolvedFile = jarRes.getArtifact().getFile();
-                    }
-                } catch (Exception ignored) {}
-            }
-
-            if (resolvedFile != null && resolvedFile.exists()) {
-                resolvedFiles.add(resolvedFile);
+            // Group:Artifact key to prevent version collision duplicates
+            String gaKey = art.getGroupId() + ":" + art.getArtifactId();
+            if (!mediatedArtifacts.containsKey(gaKey)) {
+                mediatedArtifacts.put(gaKey, file);
             }
         }
 
-        // Pipe mediated file paths back to the C++ orchestrator
-        StringBuilder resolvedPaths = new StringBuilder("MKAPK_RESOLVED");
-        for (File f : resolvedFiles) {
+        // 6. Return pipe-separated absolute paths to C++ coordinator
+        StringBuilder sb = new StringBuilder("MKAPK_RESOLVED");
+        for (File f : mediatedArtifacts.values()) {
             String name = f.getName();
-            // Ignore legacy jdk7/8 split artifacts bundled with Kotlin
+            // Ignore legacy kotlin stdlib modules
             if (name.contains("kotlin-stdlib-jdk7") || name.contains("kotlin-stdlib-jdk8")) {
                 continue;
             }
-            
-            resolvedPaths.append("|").append(f.getAbsolutePath());
-            try {
-                if (dynamicClassPathUrls != null) {
+
+            sb.append("|").append(f.getAbsolutePath());
+            if (dynamicClassPathUrls != null) {
+                try {
                     dynamicClassPathUrls.add(f.toURI().toURL());
-                }
-            } catch (Exception ignored) {}
+                } catch (Exception ignored) {}
+            }
         }
 
-        outStream.println(resolvedPaths.toString());
+        out.println(sb.toString());
         return true;
     }
 }
