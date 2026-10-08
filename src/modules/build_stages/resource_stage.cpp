@@ -2,32 +2,59 @@
 #include "mkapk_ui.hpp"
 #include "mkapk_helpers.hpp"
 #include <cstdlib>
+#include <fstream>
+#include <set>
 
 namespace fs = std::filesystem;
+
+static std::vector<fs::path> resolve_all_dependency_res_dirs(const fs::path& build_dir) {
+    std::vector<fs::path> res_dirs;
+    std::set<std::string> seen;
+
+    fs::path deps_manifest = build_dir / "dependencies.txt";
+    if (!fs::exists(deps_manifest)) {
+        return res_dirs;
+    }
+
+    std::ifstream in(deps_manifest);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue;
+        if (line.back() == '\r') line.pop_back();
+
+        fs::path p(line);
+        if (!fs::exists(p)) continue;
+
+        if (p.extension() == ".aar") {
+            fs::path ext_res = p.parent_path() / "res";
+            if (fs::exists(ext_res) && !fs::is_empty(ext_res)) {
+                std::string abs_path = fs::absolute(ext_res).string();
+                if (seen.insert(abs_path).second) {
+                    res_dirs.push_back(ext_res);
+                }
+            }
+        }
+    }
+
+    return res_dirs;
+}
 
 Result<void> ResourceStage::execute(const MkapkConfig& config, PipelineContext& ctx) {
     fs::path flat_dir = ctx.build_dir / "flat_res";
     fs::create_directories(flat_dir);
 
-    // 1. Gather all extracted AAR dependency resource folders
-    std::vector<fs::path> lib_res_dirs;
+    // 1. Gather all extracted AAR dependency resource folders dynamically from dependencies.txt
+    std::vector<fs::path> lib_res_dirs = resolve_all_dependency_res_dirs(ctx.build_dir);
     bool missing_flata = false;
 
-    for (const auto& path : ctx.all_resolved_artifacts) {
-        fs::path file_path(path);
-        if (file_path.extension() == ".aar") {
-            fs::path ext_res = file_path.parent_path() / "res";
-            if (fs::exists(ext_res) && !fs::is_empty(ext_res)) {
-                lib_res_dirs.push_back(ext_res);
-                
-                std::string lib_name = ext_res.parent_path().parent_path().filename().string();
-                std::string lib_version = ext_res.parent_path().filename().string();
-                fs::path lib_out_arc = flat_dir / (lib_name + "_" + lib_version + ".flata");
-                
-                if (!fs::exists(lib_out_arc)) {
-                    missing_flata = true;
-                }
-            }
+    for (const auto& extra_res : lib_res_dirs) {
+        // Artifact naming structure: .../<artifact_id>/<version>/res
+        std::string lib_name = extra_res.parent_path().parent_path().filename().string();
+        std::string lib_version = extra_res.parent_path().filename().string();
+        fs::path lib_out_arc = flat_dir / (lib_name + "_" + lib_version + ".flata");
+        
+        if (!fs::exists(lib_out_arc)) {
+            missing_flata = true;
         }
     }
 
