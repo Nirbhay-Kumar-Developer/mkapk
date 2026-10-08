@@ -3,7 +3,6 @@
 #include <string>
 #include <filesystem>
 #include <algorithm>
-#include <future>
 #include <memory>
 #include <stdexcept>
 #include "mkapk_helpers.hpp"
@@ -77,27 +76,21 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
 
     ctx.resources_triggered = (ctx.diff.res_changed || ctx.diff.manifest_changed || ctx.force_all);
 
+    // 1. Dependency Resolution & Cache Writing
     DependencyStage dep_stage;
-    ResourceStage res_stage;
-    NativeStage native_stage;
-    JvmStage jvm_stage;
-    PackageStage pkg_stage;
-
     Result<void> res_dep = dep_stage.execute(config, ctx);
-    if (res_dep.is_err()) throw std::runtime_error("Dependency resolution failure: " + res_dep.get_error());
+    if (res_dep.is_err()) {
+        throw std::runtime_error("Dependency resolution failure: " + res_dep.get_error());
+    }
 
-    auto resource_worker = std::async(std::launch::async, [&]() -> Result<void> {
-        return res_stage.execute(config, ctx);
-    });
+    // 2. Resource Compilation and AAPT2 Manifest/Symbol Linking
+    ResourceStage res_stage;
+    Result<void> res_resource = res_stage.execute(config, ctx);
+    if (res_resource.is_err()) {
+        throw std::runtime_error("Resource pipeline failure: " + res_resource.get_error());
+    }
 
-    auto native_worker = std::async(std::launch::async, [&]() -> Result<void> {
-        return native_stage.execute(config, ctx);
-    });
-
-    Result<void> res_resource = resource_worker.get();
-    if (res_resource.is_err()) throw std::runtime_error("Resource pipeline failure: " + res_resource.get_error());
-
-    // Synchronize R.txt state POST-AAPT2 link:
+    // 3. Detect AAPT2 R.txt ID changes and trigger JVM recompilation if necessary
     fs::path r_txt_path = ctx.build_dir / "R.txt";
     std::string post_link_r_hash = fs::exists(r_txt_path) ? get_file_hash(r_txt_path) : "";
     std::string old_r_hash = ctx.new_state["meta|r_txt"];
@@ -110,18 +103,26 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         ctx.new_state["meta|r_txt"] = post_link_r_hash;
     }
 
-    auto jvm_worker = std::async(std::launch::async, [&]() -> Result<void> {
-        return jvm_stage.execute(config, ctx);
-    });
+    // 4. Native C/C++ Compilation (Internal parallel workers handle ABI matrices safely)
+    NativeStage native_stage;
+    Result<void> res_native = native_stage.execute(config, ctx);
+    if (res_native.is_err()) {
+        throw std::runtime_error("Native compilation failure: " + res_native.get_error());
+    }
 
-    Result<void> res_native = native_worker.get();
-    if (res_native.is_err()) throw std::runtime_error("Native compilation failure: " + res_native.get_error());
+    // 5. Java/Kotlin Compilation, D8/R8 Dexing & Dependency JAR Batching
+    JvmStage jvm_stage;
+    Result<void> res_jvm = jvm_stage.execute(config, ctx);
+    if (res_jvm.is_err()) {
+        throw std::runtime_error("JVM pipeline failure: " + res_jvm.get_error());
+    }
 
-    Result<void> res_jvm = jvm_worker.get();
-    if (res_jvm.is_err()) throw std::runtime_error("JVM pipeline failure: " + res_jvm.get_error());
-
+    // 6. Packaging, Zipalign, and Apksigner
+    PackageStage pkg_stage;
     Result<void> res_pack = pkg_stage.execute(config, ctx);
-    if (res_pack.is_err()) throw std::runtime_error("Packaging failure: " + res_pack.get_error());
+    if (res_pack.is_err()) {
+        throw std::runtime_error("Packaging failure: " + res_pack.get_error());
+    }
 
     return ctx.final_output_msg;
 }
