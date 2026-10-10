@@ -5,12 +5,12 @@
 namespace fs = std::filesystem;
 
 Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& ctx) {
-    if (!ctx.diff.needs_repackage && !ctx.force_all) {
+    if (!ctx.diff.needs_repackage && !ctx.diff.config_changed && !ctx.force_all) {
         return Result<void>::success();
     }
 
     fs::path base_unsigned_apk = ctx.build_dir / "unsigned.apk";
-    
+
     // Safety check: recover base container if an upstream anomaly missed it
     if (!ctx.resources_triggered && !fs::exists(base_unsigned_apk)) {
         UI::warn("Base container missing. Forcing resource link pass resolution...");
@@ -57,23 +57,22 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
 
     for (const auto& task : package_matrix) {
         UI::stage(UI::Msg::STAGE_PACK, task.filename_suffix);
-        
+
         fs::path loop_unsigned = ctx.build_dir / ("unsigned" + task.filename_suffix + ".apk");
         fs::copy_file(base_unsigned_apk, loop_unsigned, fs::copy_options::overwrite_existing);
 
-        auto inject_res = inject_assets_and_dex(loop_unsigned, ctx.build_dir, config.assets_dir, task.target_abis, ctx.is_release);
-        if (inject_res.is_err()) return inject_res;
-
         fs::path target_processed_apk = loop_unsigned;
 
-        // AndResGuard Obfuscation pass
+        // FIX: In Release builds, run AndResGuard FIRST on the resource-only container.
+        // Running it after injection causes AndResGuard's internal zip engine to recompress
+        // uncompressed .so libraries, breaking 16KB/4KB mmap runtime page alignment.
         if (ctx.is_release) {
             fs::path resguard_jar = MkapkEnv::resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
             fs::path config_xml = fs::current_path() / "andresguard-config.xml";
             if (!fs::exists(config_xml)) config_xml = fs::current_path() / "andresguard.xml";
-            
+
             if (fs::exists(resguard_jar) && fs::exists(config_xml)) {
-                if (ctx.diff.needs_resource_obfuscation || ctx.force_all) {
+                if (ctx.diff.needs_resource_obfuscation || ctx.diff.config_changed || ctx.force_all) {
                     target_processed_apk = obfuscate_resources(ctx.tools["resguard"], loop_unsigned, ctx.build_dir, ctx.run_func);
                 }
             } else {
@@ -81,22 +80,30 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
             }
         }
 
+        // Inject classes.dex, assets, and uncompressed (STORED) .so libraries into the final/obfuscated base container
+        auto inject_res = inject_assets_and_dex(target_processed_apk, ctx.build_dir, config.assets_dir, task.target_abis, ctx.is_release);
+        if (inject_res.is_err()) return inject_res;
+
+        // Alignment: align resources to 4-byte boundaries (and uncompressed shared objects to page boundaries)
         fs::path aligned_apk = align_apk(ctx.tools["zipalign"], "4", target_processed_apk, ctx.build_dir, ctx.run_func);
         fs::path final_apk = ctx.bin_dir / (config.project_name + task.filename_suffix + ".apk");
-        
+
         UI::stage(UI::Msg::STAGE_SIGN, final_apk.filename().string());
         auto sign_res = sign_apk(ctx.tools["apksigner"], final_apk, aligned_apk, ks_info.first, ks_info.second, ctx.run_func);
         if (sign_res.is_err()) return sign_res;
-        
+
         if (fs::exists(loop_unsigned)) fs::remove(loop_unsigned);
+        if (target_processed_apk != loop_unsigned && fs::exists(target_processed_apk)) {
+            fs::remove(target_processed_apk);
+        }
 
         dynamic_ret_path = final_apk.string();
     }
 
     save_state(ctx.build_dir, ctx.new_state, ctx.is_release);
 
-    ctx.final_output_msg = ctx.ndk_all ? 
-        "Split architecture packaging structural distribution layout written within: " + ctx.bin_dir.string() : 
+    ctx.final_output_msg = ctx.ndk_all ?
+        "Split architecture packaging structural distribution layout written within: " + ctx.bin_dir.string() :
         dynamic_ret_path;
 
     return Result<void>::success();
