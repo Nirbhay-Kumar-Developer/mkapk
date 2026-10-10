@@ -16,12 +16,12 @@ namespace fs = std::filesystem;
 using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 struct LanguagePlugin {
-    std::string name;                  
-    std::string compiler;              
-    std::string source_extension;      
-    std::string output_type;           
-    std::string apt_package;           
-    bool is_verified = false;          
+    std::string name;
+    std::string compiler;
+    std::string source_extension;
+    std::string output_type;
+    std::string apt_package;
+    bool is_verified = false;
 };
 
 // Structural and actionable build flags
@@ -35,14 +35,15 @@ struct BuildResults {
     bool proguard_changed             = false;
     bool andresguard_changed          = false;
     bool r_txt_changed                = false;
+    bool config_changed               = false;
 
     // Action Directives
-    bool needs_manifest_relink        = false; 
+    bool needs_manifest_relink        = false;
     bool needs_jvm_compile            = false;
-    bool needs_repackage              = false; 
-    bool needs_dex_rebuild            = false; 
-    bool needs_resource_obfuscation   = false; 
-    
+    bool needs_repackage              = false;
+    bool needs_dex_rebuild            = false;
+    bool needs_resource_obfuscation   = false;
+
     // File tracking
     std::map<std::string, std::vector<fs::path>> changed_files;
     std::map<std::string, std::vector<fs::path>> deleted_files;
@@ -50,10 +51,10 @@ struct BuildResults {
     std::vector<fs::path> changed_assets;
 
     bool any_changes() const {
-        return src_changed || res_changed || manifest_changed || 
-               assets_changed || proguard_changed || andresguard_changed || 
-               r_txt_changed || mode_switched || needs_manifest_relink || 
-               needs_jvm_compile || needs_repackage || 
+        return src_changed || res_changed || manifest_changed ||
+               assets_changed || proguard_changed || andresguard_changed ||
+               r_txt_changed || config_changed || mode_switched || needs_manifest_relink ||
+               needs_jvm_compile || needs_repackage ||
                needs_dex_rebuild || needs_resource_obfuscation;
     }
 };
@@ -72,8 +73,8 @@ public:
 
 std::string get_file_hash(const fs::path& file_path);
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
-    const fs::path& bin_dir, 
-    const MkapkConfig& config, 
+    const fs::path& bin_dir,
+    const MkapkConfig& config,
     bool force_all,
     bool is_release
 );
@@ -140,7 +141,7 @@ fs::path obfuscate_resources(
 
 // Native Stage
 bool compile_native(
-    const std::string& NDK_BIN, 
+    const std::string& NDK_BIN,
     const fs::path& src_dir,
     const fs::path& bin_dir,
     const std::vector<std::string>& arch_list,
@@ -182,27 +183,27 @@ Result<void> run_incremental_dex(
 
 // Packaging
 Result<void> inject_assets_and_dex(
-    const fs::path& unsigned_apk, 
-    const fs::path& bin_dir, 
-    const fs::path& assets_dir, 
+    const fs::path& unsigned_apk,
+    const fs::path& bin_dir,
+    const fs::path& assets_dir,
     const std::vector<std::string>& allowed_abis,
-    bool is_release 
+    bool is_release
 );
 
 fs::path align_apk(
-    const std::string& ZIPALIGN, 
-    const std::string& alignment, 
-    const fs::path& in_apk, 
-    const fs::path& bin_dir, 
+    const std::string& ZIPALIGN,
+    const std::string& alignment,
+    const fs::path& in_apk,
+    const fs::path& bin_dir,
     RunFunc run_func
 );
 
 Result<void> sign_apk(
-    const std::string& APKSIGNER, 
-    const fs::path& final_apk, 
-    const fs::path& aligned_apk, 
-    const std::string& keystore, 
-    const std::string& alias, 
+    const std::string& APKSIGNER,
+    const fs::path& final_apk,
+    const fs::path& aligned_apk,
+    const std::string& keystore,
+    const std::string& alias,
     RunFunc run_func
 );
 

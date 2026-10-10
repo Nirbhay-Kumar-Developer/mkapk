@@ -9,7 +9,7 @@
 #include <regex>
 #include <sstream>
 #include <iomanip>
-#define XXH_INLINE_ALL 
+#define XXH_INLINE_ALL
 #include <xxhash.h>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
@@ -31,7 +31,7 @@ std::string get_file_hash(const fs::path& file_path) {
 
     XXH3_state_t* state = XXH3_createState();
     if (state == nullptr) return "";
-    
+
     if (XXH3_64bits_reset(state) == XXH_ERROR) {
         XXH3_freeState(state);
         return "";
@@ -84,8 +84,8 @@ static std::map<std::string, std::map<std::string, std::string>> load_state_map(
  * If A.java changes, finds all other .java files that import or refer to class A.
  */
 static std::vector<fs::path> expand_java_dependencies(
-    const fs::path& src_path, 
-    const std::vector<fs::path>& directly_changed_java) 
+    const fs::path& src_path,
+    const std::vector<fs::path>& directly_changed_java)
 {
     if (directly_changed_java.empty() || !fs::exists(src_path)) {
         return directly_changed_java;
@@ -144,10 +144,10 @@ static std::vector<fs::path> expand_java_dependencies(
 class IncrementalChangeChecker : public IChangeChecker {
 public:
     std::pair<BuildResults, std::map<std::string, std::string>> detect_changes(
-        const fs::path& build_dir, 
-        const MkapkConfig& config, 
+        const fs::path& build_dir,
+        const MkapkConfig& config,
         bool force_all,
-        bool is_release) override 
+        bool is_release) override
     {
         fs::path hash_file = get_profile_state_path(build_dir, is_release);
         std::string current_mode = is_release ? "release" : "debug";
@@ -186,7 +186,7 @@ public:
         if (fs::exists(src_path)) {
             for (const auto& entry : fs::recursive_directory_iterator(src_path)) {
                 if (!entry.is_regular_file()) continue;
-                
+
                 std::string rel_path = fs::relative(entry.path(), src_path).string();
                 std::string f_hash = get_file_hash(entry.path());
                 next_state["src|" + rel_path] = f_hash;
@@ -274,7 +274,13 @@ public:
         next_state["meta|r_txt"] = r_txt_hash;
         results.r_txt_changed = (r_txt_hash != old_state["meta"]["r_txt"]) || results.mode_switched;
 
-        // 11. General Source Modification Flag
+        // 11. Configuration (config.json) Check
+        fs::path config_json_path = fs::current_path() / "config.json";
+        std::string config_hash = fs::exists(config_json_path) ? get_file_hash(config_json_path) : "";
+        next_state["meta|config"] = config_hash;
+        bool config_changed = (config_hash != old_state["meta"]["config"]) || results.mode_switched;
+
+        // 12. General Source Modification Flag
         bool has_source_changes = !results.deleted_files["src"].empty();
         for (const auto& [lang, files] : results.changed_files) {
             if (!files.empty()) {
@@ -285,24 +291,24 @@ public:
         results.src_changed = has_source_changes;
 
         // -------------------------------------------------------------
-        // 12. ACTIONABLE DECISION DIRECTIVES
+        // 13. ACTIONABLE DECISION DIRECTIVES
         // -------------------------------------------------------------
 
-        // Manifest or resource changes require an aapt2 link pass
-        results.needs_manifest_relink = results.manifest_changed || results.res_changed || force_all;
+        // Manifest, resource, or configuration changes require an aapt2 link pass
+        results.needs_manifest_relink = results.manifest_changed || results.res_changed || config_changed || force_all;
 
-        // JVM sources recompile if code changed OR public resource IDs shifted
-        results.needs_jvm_compile = results.src_changed || results.r_txt_changed || force_all;
+        // JVM sources recompile if code changed, public resource IDs shifted, or config altered
+        results.needs_jvm_compile = results.src_changed || results.r_txt_changed || config_changed || force_all;
 
-        // Assets or manifest modifications require repackaging
-        results.needs_repackage = results.assets_changed || results.needs_manifest_relink || force_all;
+        // Assets, manifest modifications, or config changes require repackaging
+        results.needs_repackage = results.assets_changed || results.needs_manifest_relink || config_changed || force_all;
 
         // Dexing and Obfuscation directives
         if (is_release) {
-            results.needs_dex_rebuild = results.proguard_changed || results.needs_jvm_compile || force_all;
-            results.needs_resource_obfuscation = results.andresguard_changed || results.res_changed || results.manifest_changed || force_all;
+            results.needs_dex_rebuild = results.proguard_changed || results.needs_jvm_compile || config_changed || force_all;
+            results.needs_resource_obfuscation = results.andresguard_changed || results.res_changed || results.manifest_changed || config_changed || force_all;
         } else {
-            results.needs_dex_rebuild = results.needs_jvm_compile || force_all;
+            results.needs_dex_rebuild = results.needs_jvm_compile || config_changed || force_all;
             results.needs_resource_obfuscation = false;
         }
 
@@ -318,10 +324,10 @@ public:
  * SECTION 4: PUBLIC INTERFACE EXPORTS
  */
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
-    const fs::path& build_dir, 
-    const MkapkConfig& config, 
+    const fs::path& build_dir,
+    const MkapkConfig& config,
     bool force_all,
-    bool is_release) 
+    bool is_release)
 {
     IncrementalChangeChecker checker;
     return checker.detect_changes(build_dir, config, force_all, is_release);
@@ -329,13 +335,13 @@ std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
 
 void save_state(const fs::path& build_dir, const std::map<std::string, std::string>& next_state, bool is_release) {
     fs::path state_file = get_profile_state_path(build_dir, is_release);
-    
+
     std::ofstream f(state_file);
     if (!f.is_open()) {
         std::cerr << "!! Warning: Failed to persist project state verification maps to: " << state_file.filename().string() << std::endl;
         return;
     }
-    
+
     for (auto const& [key, hash] : next_state) {
         f << key << "|" << hash << "|\n";
     }

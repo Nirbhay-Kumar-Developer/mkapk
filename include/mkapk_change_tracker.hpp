@@ -11,6 +11,7 @@ namespace fs = std::filesystem;
 
 // Explicit booleans controlling discrete pipeline requirements
 struct BuildDecisionMatrix {
+    bool config_changed          = false; // config.json altered -> invalidates downstream build flags
     bool needs_res_compile       = false; // XML/drawables changed
     bool needs_manifest_link     = false; // AndroidManifest.xml changed -> re-link APK
     bool needs_jvm_compile       = false; // Java/Kotlin code modified
@@ -29,7 +30,8 @@ public:
         const fs::path& build_dir,
         const MkapkConfig& config,
         bool force_all,
-        bool is_release
+        bool is_release,
+        const fs::path& config_path = fs::current_path() / "config.json"
     ) = 0;
 };
 
