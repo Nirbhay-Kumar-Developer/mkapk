@@ -10,8 +10,14 @@
 #include <map>
 #include "mkapk_helpers.hpp"
 #include "mkapk_ui.hpp"
+#include <unistd.h>
+#include <sys/wait.h>
+#include <poll.h>
+#include <spawn.h>
 
 namespace fs = std::filesystem;
+
+extern char** environ;
 
 using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
@@ -30,7 +36,7 @@ Result<void> compile_resources(
     if (fs::exists(res_dir)) {
         if (changed_res_files == nullptr) {
             UI::stage(UI::Msg::STAGE_RES, "Compiling resources");
-            
+
             std::vector<std::string> args = {
                 AAPT2, "compile",
                 "--dir", fs::absolute(res_dir).string(),
@@ -38,7 +44,7 @@ Result<void> compile_resources(
             };
             auto res = run_func(args, "Full resource compilation failed");
             if (res.is_err()) return res;
-        } 
+        }
         else if (!changed_res_files->empty()) {
             UI::stage(UI::Msg::STAGE_RES, "Compiling " + std::to_string(changed_res_files->size()) + " resource files");
 
@@ -50,7 +56,7 @@ Result<void> compile_resources(
             for (const auto& f : *changed_res_files) {
                 args.push_back(fs::absolute(f).string());
             }
-            
+
             auto res = run_func(args, "Batch resource compilation failed");
             if (res.is_err()) return res;
         }
@@ -62,10 +68,10 @@ Result<void> compile_resources(
     if (!extra_dependency_res_dirs.empty()) {
         for (const auto& extra_res : extra_dependency_res_dirs) {
             if (fs::exists(extra_res) && !fs::is_empty(extra_res)) {
-                
+
                 std::string lib_name = extra_res.parent_path().parent_path().filename().string();
                 std::string lib_version = extra_res.parent_path().filename().string();
-                
+
                 fs::path lib_out_arc = flat_dir / (lib_name + "_" + lib_version + ".flata");
 
                 if (!fs::exists(lib_out_arc)) {
@@ -74,7 +80,7 @@ Result<void> compile_resources(
                         "--dir", fs::absolute(extra_res).string(),
                         "-o", fs::absolute(lib_out_arc).string()
                     };
-                    
+
                     UI::info("[+] Compiling library resources: " + lib_name);
                     auto res = run_func(extra_args, "Failed compilation of external dependency resource directory tree: " + extra_res.string());
                     if (res.is_err()) return res;
@@ -82,7 +88,7 @@ Result<void> compile_resources(
             }
         }
     }
-    
+
     return Result<void>::success();
 }
 
@@ -94,7 +100,7 @@ Result<void> link_manifest(
     const fs::path& bin_dir,
     const fs::path& src_dir,
     RunFunc run_func,
-    bool debug) 
+    bool debug)
 {
     UI::stage(UI::Msg::STAGE_RES_LINK);
 
@@ -121,7 +127,7 @@ Result<void> link_manifest(
         "-o", fs::absolute(unsigned_apk).string(),
         "-I", fs::absolute(android_jar).string(),
         "--manifest", fs::absolute(manifest).string(),
-        "--java", fs::absolute(gen_dir).string(), 
+        "--java", fs::absolute(gen_dir).string(),
         "--auto-add-overlay",
         "--proguard", fs::absolute(aapt_proguard_rules).string(),
         "--output-text-symbols", fs::absolute(r_txt_symbols).string()
@@ -150,16 +156,15 @@ Result<void> link_manifest(
     std::vector<std::string> library_r_txt_files;
 
     const char* prefix_env = std::getenv("PREFIX");
-    fs::path cache_root = prefix_env 
-        ? fs::path(prefix_env) / "var/lib/mkapk/lib" 
+    fs::path cache_root = prefix_env
+        ? fs::path(prefix_env) / "var/lib/mkapk/lib"
         : fs::path("/data/data/com.termux/files/usr/var/lib/mkapk/lib");
 
     if (fs::exists(cache_root)) {
         for (const auto& entry : fs::recursive_directory_iterator(cache_root)) {
             if (entry.is_regular_file() && entry.path().filename() == "AndroidManifest.xml") {
                 fs::path lib_dir = entry.path().parent_path();
-                
-                // Read package declaration
+
                 std::ifstream lib_mf(entry.path());
                 std::string line;
                 std::string pkg = "";
@@ -179,7 +184,6 @@ Result<void> link_manifest(
                     extra_packages.insert(pkg);
                 }
 
-                // Check for library symbol table (R.txt)
                 fs::path lib_r_txt = lib_dir / "R.txt";
                 if (fs::exists(lib_r_txt) && fs::file_size(lib_r_txt) > 0) {
                     library_r_txt_files.push_back(fs::absolute(lib_r_txt).string());
@@ -229,7 +233,81 @@ Result<void> link_manifest(
         args.push_back(arc);
     }
 
-    auto res = run_func(args, "Errors merging manifest");
+    // 5. Execution Wrapper: Direct filtering of aapt2 stderr noise without global system alterations
+    auto filtered_aapt2_run = [](const std::vector<std::string>& cmd_args) -> Result<void> {
+        int err_pipe[2];
+        if (pipe(err_pipe) == -1) {
+            return Result<void>::error("Failed to allocate pipe descriptors for AAPT2 link execution.");
+        }
+
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_adddup2(&actions, err_pipe[1], STDERR_FILENO);
+        posix_spawn_file_actions_addclose(&actions, err_pipe[0]);
+
+        std::vector<char*> c_args;
+        c_args.reserve(cmd_args.size() + 1);
+        for (const auto& arg : cmd_args) {
+            c_args.push_back(const_cast<char*>(arg.c_str()));
+        }
+        c_args.push_back(nullptr);
+
+        pid_t pid;
+        int spawn_status = posix_spawnp(&pid, c_args[0], &actions, nullptr, c_args.data(), environ);
+        posix_spawn_file_actions_destroy(&actions);
+        close(err_pipe[1]);
+
+        if (spawn_status != 0) {
+            close(err_pipe[0]);
+            return Result<void>::error("posix_spawnp failed to launch AAPT2 binary.");
+        }
+
+        // Buffer and filter stream directly
+        std::string line_buffer;
+        char chunk[2048];
+        ssize_t bytes_read;
+
+        while ((bytes_read = read(err_pipe[0], chunk, sizeof(chunk) - 1)) > 0) {
+            chunk[bytes_read] = '\0';
+            line_buffer += chunk;
+
+            size_t newline_idx;
+            while ((newline_idx = line_buffer.find('\n')) != std::string::npos) {
+                std::string line = line_buffer.substr(0, newline_idx);
+                line_buffer.erase(0, newline_idx + 1);
+
+                // Silences the internal bionic liblog package ID table dumps
+                if (line.find("No package ID") != std::string::npos ||
+                    line.find("E aapt2   :") != std::string::npos) {
+                    continue;
+                }
+
+                // Legitimate linker errors (syntax errors, missing themes, broken manifests)
+                if (!line.empty()) {
+                    std::cerr << line << '\n';
+                }
+            }
+        }
+        close(err_pipe[0]);
+
+        if (!line_buffer.empty()) {
+            if (line_buffer.find("No package ID") == std::string::npos &&
+                line_buffer.find("E aapt2   :") == std::string::npos) {
+                std::cerr << line_buffer << '\n';
+            }
+        }
+        std::cerr.flush();
+
+        int wait_status;
+        if (waitpid(pid, &wait_status, 0) != -1) {
+            if (WIFEXITED(wait_status) && WEXITSTATUS(wait_status) == 0) {
+                return Result<void>::success();
+            }
+        }
+        return Result<void>::error("AAPT2 link processing failed.");
+    };
+
+    auto res = filtered_aapt2_run(args);
     if (res.is_err()) return res;
 
     return Result<void>::success();
@@ -239,10 +317,10 @@ fs::path obfuscate_resources(
     const std::string& RESGUARD_TOOL,
     const fs::path& in_apk,
     const fs::path& build_dir,
-    RunFunc run_func) 
+    RunFunc run_func)
 {
     UI::stage(UI::Msg::STAGE_OBFUSCATE, UI::Msg::OP_OBFUSCATING);
-    
+
     fs::path resguard_out = build_dir / "resguard_out";
     if (fs::exists(resguard_out)) fs::remove_all(resguard_out);
     fs::create_directories(resguard_out);
