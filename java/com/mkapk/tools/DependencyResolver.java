@@ -7,16 +7,20 @@ import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.artifact.DefaultArtifactType;
 import org.eclipse.aether.collection.CollectRequest;
+import org.eclipse.aether.collection.CollectResult;
+import org.eclipse.aether.collection.DependencyCollectionContext;
+import org.eclipse.aether.collection.DependencyCollectionException;
+import org.eclipse.aether.collection.DependencySelector;
+import org.eclipse.aether.collection.DependencyTraverser;
 import org.eclipse.aether.graph.Dependency;
-import org.eclipse.aether.graph.DependencyFilter;
+import org.eclipse.aether.graph.DependencyNode;
 import org.eclipse.aether.repository.LocalRepository;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.resolution.ArtifactRequest;
 import org.eclipse.aether.resolution.ArtifactResult;
-import org.eclipse.aether.resolution.DependencyRequest;
-import org.eclipse.aether.resolution.DependencyResult;
 import org.eclipse.aether.util.artifact.DefaultArtifactTypeRegistry;
 import org.eclipse.aether.util.artifact.JavaScopes;
-import org.eclipse.aether.util.filter.DependencyFilterUtils;
+import org.eclipse.aether.util.graph.visitor.PreorderNodeListGenerator;
 
 import java.io.File;
 import java.io.PrintStream;
@@ -43,6 +47,42 @@ public class DependencyResolver implements ToolHandler {
         return cacheDir;
     }
 
+    /**
+     * Retains compile, runtime, and optional dependencies,
+     * discarding only test and provided scopes.
+     */
+    private static class PermissiveDependencySelector implements DependencySelector {
+        @Override
+        public boolean selectDependency(Dependency dependency) {
+            if (dependency == null) return false;
+            String scope = dependency.getScope();
+            return !JavaScopes.TEST.equalsIgnoreCase(scope)
+                    && !JavaScopes.PROVIDED.equalsIgnoreCase(scope)
+                    && !"system".equalsIgnoreCase(scope);
+        }
+
+        @Override
+        public DependencySelector deriveChildSelector(DependencyCollectionContext context) {
+            return this;
+        }
+    }
+
+    /**
+     * Forces Aether to traverse into child POMs for every dependency,
+     * preventing optional runtime components from being skipped.
+     */
+    private static class AllDependencyTraverser implements DependencyTraverser {
+        @Override
+        public boolean traverseDependency(Dependency dependency) {
+            return true;
+        }
+
+        @Override
+        public DependencyTraverser deriveChildTraverser(DependencyCollectionContext context) {
+            return this;
+        }
+    }
+
     @Override
     public boolean execute(String[] args, PrintStream out, PrintStream err) throws Exception {
         if (args.length < 1) {
@@ -51,82 +91,125 @@ public class DependencyResolver implements ToolHandler {
         }
 
         RepositorySystem system = Booter.newRepositorySystem();
-        
-        // 1. Construct Maven session and register proper artifact handlers for aar and jar
         DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
         LocalRepository localRepo = new LocalRepository(getLocalCacheDir());
         session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
 
+        // Enforce full graph traversal without scope/optional pruning in Resolver 2.x
+        session.setDependencySelector(new PermissiveDependencySelector());
+        session.setDependencyTraverser(new AllDependencyTraverser());
+        session.setConfigProperty("aether.dependencyCollector.useSkip", false);
+
+        // Register AAR and JAR packaging handlers
         DefaultArtifactTypeRegistry typeRegistry = new DefaultArtifactTypeRegistry();
-        // Crucial: define "aar" packaging type so transitive AARs resolve to their .aar binaries
         typeRegistry.add(new DefaultArtifactType("aar", "aar", "", "java", false, true));
         typeRegistry.add(new DefaultArtifactType("jar", "jar", "", "java", false, false));
         session.setArtifactTypeRegistry(typeRegistry);
 
-        // 2. Configure Repositories
+        // Repositories
         RemoteRepository google = new RemoteRepository.Builder("google", "default", "https://dl.google.com/dl/android/maven2/").build();
         RemoteRepository central = new RemoteRepository.Builder("central", "default", "https://repo1.maven.org/maven2/").build();
         List<RemoteRepository> repos = Arrays.asList(google, central);
 
-        // 3. Assemble CollectRequest
         CollectRequest collectRequest = new CollectRequest();
         collectRequest.setRepositories(repos);
 
+        // Coordinate normalization
         for (String raw : args) {
             if (raw == null || raw.trim().isEmpty()) continue;
             String coord = raw.trim();
-            collectRequest.addDependency(new Dependency(new DefaultArtifact(coord), JavaScopes.COMPILE));
-        }
-
-        // 4. Resolve dependencies transitively using DependencyRequest
-        // Exclude test and provided scopes cleanly
-        DependencyFilter classpathFilter = DependencyFilterUtils.classpathFilter(
-            JavaScopes.COMPILE,
-            JavaScopes.RUNTIME
-        );
-
-        DependencyRequest dependencyRequest = new DependencyRequest(collectRequest, classpathFilter);
-        DependencyResult dependencyResult;
-
-        try {
-            dependencyResult = system.resolveDependencies(session, dependencyRequest);
-        } catch (Exception e) {
-            out.println("[WARN]|Transitive resolution warning: " + e.getMessage());
-            // Attempt to retrieve partial results if graph resolution encountered an issue
-            if (e instanceof org.eclipse.aether.resolution.DependencyResolutionException) {
-                dependencyResult = ((org.eclipse.aether.resolution.DependencyResolutionException) e).getResult();
+            String[] parts = coord.split(":");
+            Artifact artifact;
+            if (parts.length == 3) {
+                artifact = new DefaultArtifact(parts[0], parts[1], "", "aar", parts[2]);
             } else {
-                dependencyResult = null;
+                artifact = new DefaultArtifact(coord);
             }
+            collectRequest.addDependency(new Dependency(artifact, JavaScopes.COMPILE));
         }
 
-        if (dependencyResult == null || dependencyResult.getArtifactResults() == null) {
+        // Build transitive dependency graph
+        CollectResult collectResult;
+        try {
+            collectResult = system.collectDependencies(session, collectRequest);
+        } catch (DependencyCollectionException dce) {
+            collectResult = dce.getResult();
+        } catch (Exception e) {
+            collectResult = null;
+        }
+
+        if (collectResult == null || collectResult.getRoot() == null) {
             out.println("MKAPK_RESOLVED");
             return true;
         }
 
-        // 5. Collect and deduplicate resolved files (map GA to mediated version)
+        // Extract nodes in pre-order traversal
+        PreorderNodeListGenerator nlg = new PreorderNodeListGenerator();
+        collectResult.getRoot().accept(nlg);
+
         Map<String, File> mediatedArtifacts = new LinkedHashMap<>();
+        List<DependencyNode> nodes = nlg.getNodes();
 
-        for (ArtifactResult res : dependencyResult.getArtifactResults()) {
-            if (!res.isResolved() || res.getArtifact() == null) continue;
+        for (DependencyNode node : nodes) {
+            Dependency dep = node.getDependency();
+            if (dep == null || dep.getArtifact() == null) continue;
 
-            Artifact art = res.getArtifact();
-            File file = art.getFile();
-            if (file == null || !file.exists()) continue;
+            String scope = dep.getScope();
+            if (JavaScopes.TEST.equalsIgnoreCase(scope) || JavaScopes.PROVIDED.equalsIgnoreCase(scope) || "system".equalsIgnoreCase(scope)) {
+                continue;
+            }
 
-            // Group:Artifact key to prevent version collision duplicates
+            Artifact art = dep.getArtifact();
             String gaKey = art.getGroupId() + ":" + art.getArtifactId();
-            if (!mediatedArtifacts.containsKey(gaKey)) {
-                mediatedArtifacts.put(gaKey, file);
+            if (mediatedArtifacts.containsKey(gaKey)) {
+                continue;
+            }
+
+            File resolvedFile = null;
+            boolean preferAar = "aar".equalsIgnoreCase(art.getExtension()) || art.getGroupId().startsWith("androidx.");
+
+            // Strategy 1: Attempt AAR download for Android components
+            if (preferAar) {
+                Artifact aarArtifact = new DefaultArtifact(art.getGroupId(), art.getArtifactId(), art.getClassifier(), "aar", art.getVersion());
+                try {
+                    ArtifactResult aarRes = system.resolveArtifact(session, new ArtifactRequest(aarArtifact, repos, null));
+                    if (aarRes.isResolved() && aarRes.getArtifact().getFile() != null) {
+                        resolvedFile = aarRes.getArtifact().getFile();
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // Strategy 2: Attempt download using declared extension
+            if (resolvedFile == null) {
+                try {
+                    ArtifactResult directRes = system.resolveArtifact(session, new ArtifactRequest(art, repos, null));
+                    if (directRes.isResolved() && directRes.getArtifact().getFile() != null) {
+                        resolvedFile = directRes.getArtifact().getFile();
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // Strategy 3: Fallback attempt as AAR if direct download failed
+            if (resolvedFile == null && !preferAar) {
+                Artifact aarArtifact = new DefaultArtifact(art.getGroupId(), art.getArtifactId(), art.getClassifier(), "aar", art.getVersion());
+                try {
+                    ArtifactResult aarRes = system.resolveArtifact(session, new ArtifactRequest(aarArtifact, repos, null));
+                    if (aarRes.isResolved() && aarRes.getArtifact().getFile() != null) {
+                        resolvedFile = aarRes.getArtifact().getFile();
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            if (resolvedFile != null && resolvedFile.exists()) {
+                mediatedArtifacts.put(gaKey, resolvedFile);
             }
         }
 
-        // 6. Return pipe-separated absolute paths to C++ coordinator
+        // Return pipe-separated absolute paths back to C++ coordinator
         StringBuilder sb = new StringBuilder("MKAPK_RESOLVED");
         for (File f : mediatedArtifacts.values()) {
             String name = f.getName();
-            // Ignore legacy kotlin stdlib modules
+            // Drop legacy split Kotlin stdlib artifacts
             if (name.contains("kotlin-stdlib-jdk7") || name.contains("kotlin-stdlib-jdk8")) {
                 continue;
             }
