@@ -58,7 +58,7 @@ Result<void> run_incremental_dex(
         if (fs::exists(class_dir)) {
             for (const auto& entry : fs::directory_iterator(class_dir)) {
                 std::string filename = entry.path().filename().string();
-                // Exact matching for base class and its inner classes
+                // Match the main class and all associated inner/companion classes
                 if (filename == base_name + ".class" || filename.rfind(base_name + "$", 0) == 0) {
                     family_classes.push_back(fs::absolute(entry.path()).string());
                 }
@@ -69,15 +69,32 @@ Result<void> run_incremental_dex(
             fs::path target_dex_dir = dex_cache / rel_path.parent_path();
             fs::create_directories(target_dex_dir);
 
+            // 1. Clean up any existing DEX slices for this class family to prevent stale remnants
+            if (fs::exists(target_dex_dir)) {
+                for (const auto& entry : fs::directory_iterator(target_dex_dir)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".dex") {
+                        std::string stem = entry.path().stem().string();
+                        if (stem == base_name || stem.rfind(base_name + "_", 0) == 0) {
+                            fs::remove(entry.path());
+                        }
+                    }
+                }
+            }
+
+            // 2. Isolate D8 output into a temporary folder to capture all emitted slices cleanly
+            fs::path temp_dex_dir = target_dex_dir / ("_tmp_" + base_name);
+            if (fs::exists(temp_dex_dir)) fs::remove_all(temp_dex_dir);
+            fs::create_directories(temp_dex_dir);
+
             std::vector<std::string> d8_args = {
-                "d8", 
-                "--min-api", "21", // Automates Java 8+ language desugaring
+                D8, 
+                "--min-api", "21",
                 "--lib", fs::absolute(android_jar).string(),
                 "--classpath", fs::absolute(java_out).string(),
-                "--output", fs::absolute(target_dex_dir).string()
+                "--output", fs::absolute(temp_dex_dir).string()
             };
 
-            // Inject extra dependency archives (from AAR/JAR) for interface desugaring
+            // Inject extra dependency archives for interface desugaring resolution
             for (const auto& jar : extra_jvm_classpaths) {
                 d8_args.push_back("--classpath");
                 d8_args.push_back(fs::absolute(jar).string());
@@ -88,12 +105,32 @@ Result<void> run_incremental_dex(
             }
 
             auto res = run(d8_args, "Incremental D8 failed for: " + base_name);
-            if (res.is_err()) return res;
+            if (res.is_err()) {
+                fs::remove_all(temp_dex_dir);
+                return res;
+            }
 
-            fs::path gen_dex = target_dex_dir / "classes.dex";
-            fs::path final_dex = target_dex_dir / (base_name + ".dex");
-            if (fs::exists(gen_dex)) {
-                fs::rename(gen_dex, final_dex);
+            // 3. Move and deterministically rename every generated classes*.dex file
+            if (fs::exists(temp_dex_dir)) {
+                for (const auto& entry : fs::directory_iterator(temp_dex_dir)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".dex") {
+                        std::string filename = entry.path().filename().string();
+                        fs::path dest_file;
+
+                        if (filename == "classes.dex") {
+                            dest_file = target_dex_dir / (base_name + ".dex");
+                        } else if (filename.rfind("classes", 0) == 0) {
+                            // Extract slice suffix (e.g., "classes2.dex" -> "2")
+                            std::string suffix = filename.substr(7, filename.size() - 7 - 4);
+                            dest_file = target_dex_dir / (base_name + "_" + suffix + ".dex");
+                        } else {
+                            dest_file = target_dex_dir / (base_name + "_" + filename);
+                        }
+
+                        fs::rename(entry.path(), dest_file);
+                    }
+                }
+                fs::remove_all(temp_dex_dir);
             }
         }
     }
@@ -107,8 +144,6 @@ Result<void> run_incremental_dex(
  * - Exports mapping.txt for de-obfuscation
  * - Uses Arg-Files to prevent E2BIG overflow on large codebases
  */
-
-namespace fs = std::filesystem;
 
 Result<void> run_dex_r8(
     const std::string& R8_TOOL,
