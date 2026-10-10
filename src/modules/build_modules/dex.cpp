@@ -7,6 +7,7 @@
 #include <functional>
 #include <set>
 #include <cstdlib>
+#include <zip.h>
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_result.hpp"
@@ -166,10 +167,12 @@ Result<void> run_dex_r8(
                                           : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
     fs::path annotations_jar = kotlin_lib_root / "annotations-13.0.jar"; 
 
+    std::string min_api_val = config.min_sdk.empty() ? "21" : config.min_sdk;
+
     std::vector<std::string> args = {
         R8_TOOL,
         "--release",
-        "--min-api", "21",
+        "--min-api", min_api_val,
         "--lib", fs::absolute(android_jar).string(),
         "--output", bin_dir_path.string()
     };
@@ -198,35 +201,88 @@ Result<void> run_dex_r8(
             args.push_back(fs::absolute(aapt_rules).string());
         }
 
-        // 2. Discover and forward all library consumer rules (proguard.txt)
+        // 2. Discover and forward all library consumer rules
         std::set<std::string> seen_rules;
+        std::vector<std::string> rule_filenames = {
+            "proguard.txt",
+            "consumer-rules.pro",
+            "proguard.pro"
+        };
 
-        // Path A: Inspect directories of supplied dependency JARs
+        // Path A: Inspect directories of supplied dependency JARs/AARs
         for (const auto& jar : extra_dependency_jars) {
             fs::path dir = jar.parent_path();
-            fs::path candidate = dir / "proguard.txt";
-            if (fs::exists(candidate) && fs::file_size(candidate) > 0) {
-                std::string abs_rule = fs::absolute(candidate).string();
-                if (seen_rules.insert(abs_rule).second) {
-                    args.push_back("--pg-conf");
-                    args.push_back(abs_rule);
+            for (const auto& name : rule_filenames) {
+                fs::path candidate = dir / name;
+                if (fs::exists(candidate) && fs::file_size(candidate) > 0) {
+                    std::string abs_rule = fs::absolute(candidate).string();
+                    if (seen_rules.insert(abs_rule).second) {
+                        args.push_back("--pg-conf");
+                        args.push_back(abs_rule);
+                    }
+                }
+            }
+
+            // Path B: Extract embedded ProGuard rules from META-INF/proguard/ inside JAR files
+            if (fs::exists(jar) && jar.extension() == ".jar") {
+                int err = 0;
+                zip_t* archive = zip_open(jar.string().c_str(), 0, &err);
+                if (archive) {
+                    zip_int64_t num_entries = zip_get_num_entries(archive, 0);
+                    for (zip_int64_t i = 0; i < num_entries; ++i) {
+                        const char* entry_name = zip_get_name(archive, i, 0);
+                        if (!entry_name) continue;
+
+                        std::string entry_str(entry_name);
+                        if (entry_str.rfind("META-INF/proguard/", 0) == 0 && entry_str.back() != '/') {
+                            fs::path rule_dest_dir = bin_dir_path / "extracted_proguard_rules" / jar.stem();
+                            fs::create_directories(rule_dest_dir);
+
+                            fs::path out_rule_path = rule_dest_dir / fs::path(entry_str).filename();
+                            zip_file_t* zf = zip_fopen_index(archive, i, 0);
+                            if (zf) {
+                                std::ofstream out_f(out_rule_path, std::ios::binary);
+                                if (out_f.is_open()) {
+                                    char buf[4096];
+                                    zip_int64_t bytes = 0;
+                                    while ((bytes = zip_fread(zf, buf, sizeof(buf))) > 0) {
+                                        out_f.write(buf, bytes);
+                                    }
+                                    out_f.close();
+                                }
+                                zip_fclose(zf);
+
+                                if (fs::exists(out_rule_path) && fs::file_size(out_rule_path) > 0) {
+                                    std::string abs_rule = fs::absolute(out_rule_path).string();
+                                    if (seen_rules.insert(abs_rule).second) {
+                                        args.push_back("--pg-conf");
+                                        args.push_back(abs_rule);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    zip_close(archive);
                 }
             }
         }
 
-        // Path B: Recursively scan the mkapk library cache for any extracted proguard.txt
+        // Path C: Recursively scan the mkapk library cache for any loose rule files
         fs::path mkapk_cache_lib = prefix_env 
             ? fs::path(prefix_env) / "var/lib/mkapk/lib" 
             : fs::path("/data/data/com.termux/files/usr/var/lib/mkapk/lib");
 
         if (fs::exists(mkapk_cache_lib)) {
             for (const auto& entry : fs::recursive_directory_iterator(mkapk_cache_lib)) {
-                if (entry.is_regular_file() && entry.path().filename() == "proguard.txt") {
-                    if (fs::file_size(entry.path()) > 0) {
-                        std::string abs_rule = fs::absolute(entry.path()).string();
-                        if (seen_rules.insert(abs_rule).second) {
-                            args.push_back("--pg-conf");
-                            args.push_back(abs_rule);
+                if (entry.is_regular_file()) {
+                    std::string fname = entry.path().filename().string();
+                    if (std::find(rule_filenames.begin(), rule_filenames.end(), fname) != rule_filenames.end()) {
+                        if (fs::file_size(entry.path()) > 0) {
+                            std::string abs_rule = fs::absolute(entry.path()).string();
+                            if (seen_rules.insert(abs_rule).second) {
+                                args.push_back("--pg-conf");
+                                args.push_back(abs_rule);
+                            }
                         }
                     }
                 }
