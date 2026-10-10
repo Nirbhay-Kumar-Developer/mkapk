@@ -61,7 +61,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
 #elif defined(__i386__) || defined(__i686__)
         host_arch = "i686-linux-android";
 #else
-        host_arch = "aarch64-linux-android"; 
+        host_arch = "aarch64-linux-android";
 #endif
         ctx.compile_architectures = { host_arch };
     }
@@ -74,7 +74,25 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         return "up-to-date";
     }
 
-    ctx.resources_triggered = (ctx.diff.res_changed || ctx.diff.manifest_changed || ctx.force_all);
+    // Invalidate resource linking if resources, manifest, or config.json shifted
+    ctx.resources_triggered = (ctx.diff.res_changed || ctx.diff.manifest_changed || ctx.diff.config_changed || ctx.force_all);
+
+    // If config.json changed, populate source batches to ensure all code is recompiled
+    if (ctx.diff.config_changed && fs::exists(ctx.src_dir)) {
+        for (const auto& entry : fs::recursive_directory_iterator(ctx.src_dir)) {
+            if (!entry.is_regular_file()) continue;
+            std::string ext = entry.path().extension().string();
+            if (ext == ".java") {
+                if (std::find(ctx.diff.changed_files["java"].begin(), ctx.diff.changed_files["java"].end(), entry.path()) == ctx.diff.changed_files["java"].end()) {
+                    ctx.diff.changed_files["java"].push_back(entry.path());
+                }
+            } else if (ext == ".kt") {
+                if (std::find(ctx.diff.changed_files["kotlin"].begin(), ctx.diff.changed_files["kotlin"].end(), entry.path()) == ctx.diff.changed_files["kotlin"].end()) {
+                    ctx.diff.changed_files["kotlin"].push_back(entry.path());
+                }
+            }
+        }
+    }
 
     // 1. Dependency Resolution & Cache Writing
     DependencyStage dep_stage;
@@ -101,6 +119,23 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         ctx.diff.needs_dex_rebuild = true;
         ctx.diff.needs_repackage = true;
         ctx.new_state["meta|r_txt"] = post_link_r_hash;
+
+        // Populate both Java and Kotlin source lists so all dependent code rebinds IDs
+        if (fs::exists(ctx.src_dir)) {
+            for (const auto& entry : fs::recursive_directory_iterator(ctx.src_dir)) {
+                if (!entry.is_regular_file()) continue;
+                std::string ext = entry.path().extension().string();
+                if (ext == ".java") {
+                    if (std::find(ctx.diff.changed_files["java"].begin(), ctx.diff.changed_files["java"].end(), entry.path()) == ctx.diff.changed_files["java"].end()) {
+                        ctx.diff.changed_files["java"].push_back(entry.path());
+                    }
+                } else if (ext == ".kt") {
+                    if (std::find(ctx.diff.changed_files["kotlin"].begin(), ctx.diff.changed_files["kotlin"].end(), entry.path()) == ctx.diff.changed_files["kotlin"].end()) {
+                        ctx.diff.changed_files["kotlin"].push_back(entry.path());
+                    }
+                }
+            }
+        }
     }
 
     // 4. Native C/C++ Compilation (Internal parallel workers handle ABI matrices safely)
