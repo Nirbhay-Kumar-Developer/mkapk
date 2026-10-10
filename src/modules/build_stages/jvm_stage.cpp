@@ -32,7 +32,7 @@ static std::vector<fs::path> resolve_all_dependency_jars(const fs::path& build_d
             if (seen.insert(abs_path).second) {
                 jars.push_back(p);
             }
-        } 
+        }
         // 2. Extracted AAR artifacts
         else if (p.extension() == ".aar") {
             fs::path aar_dir = p.parent_path();
@@ -90,34 +90,34 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
         }
     }
 
-    // 2. Only run javac / kotlinc if code modified, R.txt changed, or full rebuild requested
-    if (ctx.diff.needs_jvm_compile || ctx.force_all) {
+    // 2. Recompile source logic if JVM compilation is flagged, config changed, or forced
+    if (ctx.diff.needs_jvm_compile || ctx.diff.config_changed || ctx.force_all) {
         UI::stage(UI::Msg::STAGE_SOURCE, UI::Msg::OP_COMPILING_JVM);
 
         auto logic_res = compile_source_logic(
-            config, 
-            ctx.tools, 
-            ctx.active_plugins, 
-            ctx.android_jar, 
-            ctx.build_dir, 
-            ctx.diff.changed_files, 
-            ctx.diff.deleted_files, 
-            (ctx.diff.res_changed || ctx.force_all), 
+            config,
+            ctx.tools,
+            ctx.active_plugins,
+            ctx.android_jar,
+            ctx.build_dir,
+            ctx.diff.changed_files,
+            ctx.diff.deleted_files,
+            (ctx.diff.res_changed || ctx.diff.config_changed || ctx.force_all),
             ctx.run_func,
             extra_jvm_classpaths
         );
-        
+
         if (logic_res.is_err()) {
             return Result<void>::error(logic_res.get_error());
         }
-        
+
         java_out = logic_res.get_value().first;
         dex_cache = logic_res.get_value().second;
     }
 
     // 3. Early exit: If DEX artifacts exist and no rebuild triggers were flagged, skip D8/R8
     fs::path target_classes_dex = ctx.build_dir / "classes.dex";
-    if (!ctx.diff.needs_dex_rebuild && !ctx.force_all && fs::exists(target_classes_dex)) {
+    if (!ctx.diff.needs_dex_rebuild && !ctx.diff.config_changed && !ctx.force_all && fs::exists(target_classes_dex)) {
         return Result<void>::success();
     }
 
@@ -125,12 +125,12 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
     if (ctx.is_release) {
         UI::stage(UI::Msg::STAGE_MINIFY, UI::Msg::OP_R8_OPTIMIZE);
         auto r8_res = run_dex_r8(
-            ctx.tools["r8"], 
-            ctx.android_jar, 
-            config, 
-            ctx.build_dir, 
-            ctx.run_func, 
-            false, 
+            ctx.tools["r8"],
+            ctx.android_jar,
+            config,
+            ctx.build_dir,
+            ctx.run_func,
+            false,
             extra_jvm_classpaths
         );
         if (r8_res.is_err()) return r8_res;
@@ -138,7 +138,7 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
     // 5. Debug Mode: Incremental D8 Translation & Unified Merge
     else {
         UI::stage(UI::Msg::STAGE_DEX);
-        
+
         std::vector<fs::path> unified_dex_targets;
         for (const auto& [lang, files] : ctx.diff.changed_files) {
             auto plug_it = ctx.active_plugins.find("." + lang);
@@ -147,14 +147,23 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
             }
         }
 
+        // If config changed, ensure all compiled classes are re-translated
+        if (ctx.diff.config_changed && fs::exists(java_out)) {
+            for (const auto& entry : fs::recursive_directory_iterator(java_out)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".class") {
+                    unified_dex_targets.push_back(entry.path());
+                }
+            }
+        }
+
         // 5a. Incremental translation for modified application source classes
         if (!unified_dex_targets.empty()) {
             auto d8_inc_res = run_incremental_dex(
-                ctx.tools["d8"], 
-                ctx.android_jar, 
-                ctx.src_dir, 
-                java_out, 
-                dex_cache, 
+                ctx.tools["d8"],
+                ctx.android_jar,
+                ctx.src_dir,
+                java_out,
+                dex_cache,
                 unified_dex_targets,
                 extra_jvm_classpaths,
                 ctx.run_func
@@ -164,7 +173,7 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
 
         // 5b. Batch-dex external dependency JARs into consolidated DEX slices
         fs::path deps_marker = dex_cache / ".deps_dexed";
-        if (!fs::exists(deps_marker) || ctx.diff.needs_dex_rebuild || ctx.force_all) {
+        if (!fs::exists(deps_marker) || ctx.diff.needs_dex_rebuild || ctx.diff.config_changed || ctx.force_all) {
             // Remove previous dependency DEX slices from dex_cache
             for (const auto& entry : fs::directory_iterator(dex_cache)) {
                 if (entry.is_regular_file() && entry.path().extension() == ".dex") {
@@ -189,9 +198,10 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
                 }
                 libs_file.close();
 
+                std::string min_api_val = config.min_sdk.empty() ? "21" : config.min_sdk;
                 std::vector<std::string> d8_batch_args = {
                     "d8",
-                    "--min-api", "21",
+                    "--min-api", min_api_val,
                     "--lib", fs::absolute(ctx.android_jar).string(),
                     "--output", temp_libs_dex_dir.string(),
                     "@" + libs_list_file.string()
