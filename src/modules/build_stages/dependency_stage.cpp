@@ -27,7 +27,7 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
     for (const auto& dep : config.dependencies) {
         deps_ss << dep << "\n";
     }
-    
+
     std::hash<std::string> hasher;
     std::string current_deps_hash = std::to_string(hasher(deps_ss.str()));
 
@@ -37,7 +37,8 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
         hf >> cached_deps_hash;
     }
 
-    bool deps_config_changed = (current_deps_hash != cached_deps_hash) || ctx.force_all;
+    // Invalidate if the dependency array or overall config changed, or on full build
+    bool deps_config_changed = (current_deps_hash != cached_deps_hash) || ctx.diff.config_changed || ctx.force_all;
 
     // 2. Read dependencies.txt if it already exists
     std::vector<std::string> cached_artifacts;
@@ -91,7 +92,7 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
     } else {
         UI::info("Dependencies configuration up-to-date. Using cached resolution graph.");
         ctx.all_resolved_artifacts = cached_artifacts;
-        
+
         // Ensure all cached AARs have their classes.jar and res/ unpacked
         MkapkExtractor::extract_all(ctx.all_resolved_artifacts);
     }
@@ -102,10 +103,11 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
     bool manifest_src_changed = ctx.diff.manifest_changed;
     bool merged_manifest_missing = !fs::exists(merged_manifest_output);
 
-    if (manifest_src_changed || deps_config_changed || merged_manifest_missing || ctx.force_all) {
+    // Trigger manifest merging if source manifest, dependencies, config (min/target SDK), or output is missing
+    if (manifest_src_changed || deps_config_changed || ctx.diff.config_changed || merged_manifest_missing || ctx.force_all) {
         bool merge_success = MkapkManifestMerger::merge_manifests(
-            ctx.manifest_path.string(), 
-            merged_manifest_output.string(), 
+            ctx.manifest_path.string(),
+            merged_manifest_output.string(),
             ctx.all_resolved_artifacts,
             config.min_sdk,
             config.target_sdk
@@ -119,6 +121,6 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
     } else {
         ctx.active_manifest_path = merged_manifest_output;
     }
-    
+
     return Result<void>::success();
 }
