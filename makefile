@@ -3,8 +3,10 @@ BUILD_MODE ?= debug
 
 ifeq ($(BUILD_MODE), release)
     MODE_FLAGS = -O3
+    RELEASE_LDFLAGS = -s
 else
     MODE_FLAGS = -O0 -g
+    RELEASE_LDFLAGS =
 endif
 
 # --- Compiler & Flags ---
@@ -12,12 +14,8 @@ CXX = g++
 DEPFLAGS = -MMD -MP
 CXXFLAGS = $(MODE_FLAGS) -std=c++20 -I./src -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux -I./include $(DEPFLAGS)
 
-# --- Library Paths ---
-JVM_LIB_PATH = $(JAVA_HOME)/lib/server
-
-LDFLAGS = -L$(JVM_LIB_PATH) \
-          -Wl,-rpath=$(JVM_LIB_PATH) \
-          -ljvm -lcrypto -lssl -lzip -lpthread -landroid-spawn
+# --- Library Paths & Linker Flags ---
+LDFLAGS = $(RELEASE_LDFLAGS) -lcrypto -lssl -lzip -lpthread -landroid-spawn
 
 # --- Directories ---
 BUILD_DIR = build/$(BUILD_MODE)
@@ -50,29 +48,29 @@ all: $(TARGET) package_objs
 
 # 1. Link the final binary using all discovered objects
 $(TARGET): $(ALL_OBJS)
-	@echo ">> Linking Final Binary with RPATH ($BUILD_MODE)..."
+	@echo ">> Linking Final Binary ($(BUILD_MODE))..."
 	@mkdir -p $(BUILD_DIR)
-	$(CXX) $(ALL_OBJS) -o $@ $(LDFLAGS)
+	@$(CXX) $(ALL_OBJS) -o $@ $(LDFLAGS)
 
 # 2. Partial Linking
 package_objs: $(FINAL_PROVIDER_OBJ) $(FINAL_HELPER_OBJ)
-	@echo ">> Mega-objects ready for packaging ($BUILD_MODE)."
+	@echo ">> Mega-objects ready for packaging ($(BUILD_MODE))."
 
 $(FINAL_PROVIDER_OBJ): $(PROVIDER_OBJS)
 	@echo ">> Creating combined Providers object..."
 	@mkdir -p $(dir $@)
-	ld -r $^ -o $@
+	@ld -r $^ -o $@
 
 $(FINAL_HELPER_OBJ): $(HELPER_OBJS)
 	@echo ">> Creating combined Helpers object..."
 	@mkdir -p $(dir $@)
-	ld -r $^ -o $@
+	@ld -r $^ -o $@
 
 # 3. Universal Pattern Rule
 $(OBJ_DIR)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	@echo "   [CXX] $<"
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # 4. Include automatic header dependencies
 -include $(DEPS)
@@ -80,9 +78,9 @@ $(OBJ_DIR)/%.o: src/%.cpp
 # Clean specific build mode
 clean:
 	@echo ">> Cleaning $(BUILD_MODE) build artifacts..."
-	rm -rf $(BUILD_DIR)
+	@rm -rf $(BUILD_DIR)
 
 # Clean all modes entirely
 clean-all:
 	@echo ">> Cleaning all build artifacts..."
-	rm -rf build
+	@rm -rf build
