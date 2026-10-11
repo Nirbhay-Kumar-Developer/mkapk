@@ -310,8 +310,9 @@ fs::path align_apk(const std::string& ZIPALIGN, const std::string& alignment,
 
     if (fs::exists(aligned_apk)) fs::remove(aligned_apk);
 
+    // Pass -P 16 without -p (they are mutually exclusive)
     run_func({
-        ZIPALIGN, "-f", "-p", alignment,
+        ZIPALIGN, "-f", "-P", "16", alignment,
         in_apk.string(), aligned_apk.string()
     }, "Zipalign verification and translation run dropped tracking error boundaries.");
 
