@@ -9,6 +9,7 @@
 #include "mkapk_resolver.hpp"
 #include "mkapk_helpers.hpp"
 #include "mkapk_ui.hpp"
+#include "mkapk_ipc.hpp"
 
 namespace MkapkResolver {
 
@@ -46,13 +47,13 @@ std::vector<std::string> resolve_dependencies(const std::vector<std::string>& co
     daemon_args.insert(daemon_args.end(), coordinates.begin(), coordinates.end());
 
     // 2. Delegate execution securely to the background thread pool proxy handler
-    auto res = call_java_tool(daemon_args);
+    auto res = IpcClient::call_java_tool(daemon_args);
     if (res.is_err()) {
         UI::warn(std::string("Resolver notice: ") + res.get_error());
     }
 
     // 3. Parse explicit IPC output payload returned by Java Daemon (MKAPK_RESOLVED|/path/a.aar|/path/b.jar...)
-    const auto& outputs = get_last_daemon_output();
+    const auto& outputs = IpcClient::get_last_daemon_output();
     for (const auto& line : outputs) {
         if (line.rfind("MKAPK_RESOLVED|", 0) == 0) {
             std::stringstream ss(line.substr(15));

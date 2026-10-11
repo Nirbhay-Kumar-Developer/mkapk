@@ -16,6 +16,8 @@
 #include "mkapk_result.hpp"
 #include "mkapk_log_sanitizer.hpp"
 
+namespace IpcClient {
+
 static int pipe_to_jvm[2] = {-1, -1};   // C++ writes to JVM
 static int pipe_from_jvm[2] = {-1, -1}; // C++ reads from JVM
 static int pipe_err_from_jvm[2] = {-1, -1};
@@ -367,4 +369,5 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
     }
     
     return Result<void>::success();
+}
 }

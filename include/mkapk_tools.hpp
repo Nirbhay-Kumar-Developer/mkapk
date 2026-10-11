@@ -102,15 +102,6 @@ Result<void> compile_incremental_kotlin(
     const std::vector<std::string>& classpath_extra = {}
 );
 
-Result<void> compile_kotlin(
-    const std::string& KOTLINC,
-    const fs::path& android_jar,
-    const fs::path& classes_dir,
-    const fs::path& src_dir,
-    RunFunc run_func,
-    const std::string& compose_plugin = ""
-);
-
 // Resources
 Result<void> compile_resources(
     const std::string& AAPT2,

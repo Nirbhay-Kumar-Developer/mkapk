@@ -132,27 +132,3 @@ Result<void> compile_incremental_kotlin(
     
     return Result<void>::success();
 }
-
-Result<void> compile_kotlin(
-    const std::string& KOTLINC,
-    const fs::path& android_jar,
-    const fs::path& classes_dir,
-    const fs::path& src_dir,
-    RunFunc run_func,
-    const std::string& compose_plugin) 
-{
-    std::vector<fs::path> kt_files;
-    if (!fs::exists(src_dir)) {
-        return Result<void>::error("Kotlin workspace tracking directory missing from context layout: " + src_dir.string());
-    }
-
-    for (const auto& entry : fs::recursive_directory_iterator(src_dir)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".kt") {
-            kt_files.push_back(entry.path());
-        }
-    }
-
-    if (kt_files.empty()) return Result<void>::success();
-
-    return compile_incremental_kotlin(KOTLINC, android_jar, classes_dir, kt_files, run_func, compose_plugin, false, {});
-}

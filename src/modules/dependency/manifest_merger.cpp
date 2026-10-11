@@ -7,6 +7,7 @@
 #include "mkapk_manifest_merger.hpp"
 #include "mkapk_helpers.hpp"
 #include "mkapk_ui.hpp"
+#include "mkapk_ipc.hpp"
 
 namespace fs = std::filesystem;
 
@@ -78,7 +79,7 @@ bool merge_manifests(
     }
 
     try {
-        call_java_tool(daemon_args);
+        IpcClient::call_java_tool(daemon_args);
     } catch (const std::exception& e) {
         UI::error("Manifest merging execution failed during daemon processing", e.what());
         return false;

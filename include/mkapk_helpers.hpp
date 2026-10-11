@@ -48,10 +48,6 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
     const std::vector<fs::path>& extra_jvm_classpaths = {}
 );
 
-Result<void> start_daemon(const std::string& classpath);
-void stop_daemon();
-const std::vector<std::string>& get_last_daemon_output();
-Result<void> call_java_tool(const std::vector<std::string>& args);
 Result<void> smart_run(const std::vector<std::string>& args, const std::string& err_msg);
 
 void auto_place_system_libraries(

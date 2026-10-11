@@ -11,6 +11,7 @@
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
+#include "mkapk_ipc.hpp"
 
 /**
  * Smart Command Runner: Routes tools to either the persistent Daemon or native posix_spawn.
@@ -40,7 +41,7 @@ Result<void> smart_run(const std::vector<std::string>& args, const std::string& 
         daemon_args[0] = tool_name; 
         
         // Return the IPC execution result so failures are propagated up the pipeline
-        return call_java_tool(daemon_args);
+        return IpcClient::call_java_tool(daemon_args);
     } else {
         // Delegate to the centralized POSIX spawn execution handler
         bool success = MkapkEnv::run_system_cmd(args);
