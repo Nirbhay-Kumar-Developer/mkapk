@@ -81,8 +81,6 @@ int main(int argc, char* argv[]) {
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
     std::streambuf* old_cerr_buf = std::cerr.rdbuf();
-    JavaWarningFilterBuf filter_buf(old_cerr_buf);
-    std::cerr.rdbuf(&filter_buf);
     
     std::vector<std::string> args(argv + 1, argv + argc);
 
