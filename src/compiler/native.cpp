@@ -1,26 +1,17 @@
-#include <iostream>
 #include <vector>
 #include <string>
 #include <filesystem>
 #include <map>
 #include <algorithm>
-#include <functional>
 #include <future>
 #include <mutex>
 #include <cstdlib>
-#include "mkapk_helpers.hpp"
+
+#include "mkapk_config.hpp"
+#include "mkapk_tools.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
-
-using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
-
-// Ported ARCH_MAP for standard Android NDK triplets
-static std::map<std::string, std::string> ARCH_MAP = {
-    {"aarch64-linux-android", "arm64-v8a"},
-    {"armv7a-linux-androideabi", "armeabi-v7a"},
-    {"i686-linux-android", "x86"},
-    {"x86_64-linux-android", "x86_64"}
-};
 
 // Global synchronization mutex lock to prevent concurrent workers from scrambling stdout logs
 static std::mutex console_mutex;
@@ -93,7 +84,7 @@ bool compile_native(
             // SECURED: Capturing entirely by value [=] guarantees memory safety for detached threads
             // preventing dangling references if the stack unwinds early.
             compile_workers.push_back(std::async(std::launch::async, [=]() {
-                std::string apk_lib_dir = ARCH_MAP.count(arch) ? ARCH_MAP[arch] : "unknown";
+                std::string apk_lib_dir = MkapkEnv::ARCH_TO_ABI.count(arch) ? MkapkEnv::ARCH_TO_ABI.at(arch) : "unknown";
                 if (apk_lib_dir == "unknown") return;
 
                 std::string compiler_c = "clang";

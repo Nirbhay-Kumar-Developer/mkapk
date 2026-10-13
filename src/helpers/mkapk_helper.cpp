@@ -1,17 +1,10 @@
 #include <vector>
 #include <string>
-#include <sstream>
 #include <algorithm>
-#include <functional>
-#include <poll.h>
-#include <cerrno>
-#include <unistd.h>
-#include <sys/wait.h>
 
 #include "mkapk_helpers.hpp"
-#include "mkapk_tools.hpp"
-#include "mkapk_ui.hpp"
 #include "mkapk_ipc.hpp"
+#include "mkapk_result.hpp"
 
 /**
  * Smart Command Runner: Routes tools to either the persistent Daemon or native posix_spawn.

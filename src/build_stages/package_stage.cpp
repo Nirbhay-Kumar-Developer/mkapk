@@ -1,6 +1,15 @@
+#include <vector>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <utility>
+
 #include "pipeline_stage.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_helpers.hpp"
+#include "mkapk_config.hpp"
+#include "mkapk_result.hpp"
+#include "mkapk_tools.hpp"
 
 namespace fs = std::filesystem;
 

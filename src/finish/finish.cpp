@@ -1,27 +1,21 @@
-#define _POSIX_C_SOURCE 200112L
-#include <iostream>
+#include <zip.h>
 #include <vector>
 #include <string>
 #include <filesystem>
-#include <algorithm>
-#include <fstream>
-#include <zip.h>
-#include <sys/stat.h>
 #include <map>
-#include <functional>
-#include "mkapk_helpers.hpp"
-#include "mkapk_tools.hpp"
-#include "mkapk_ui.hpp"
 #include <cctype>
-#include <spawn.h>
-#include <sys/wait.h>
 #include <stdexcept>
 #include <set>
 #include <cstdlib>
+#include <utility>
+
+#include "mkapk_helpers.hpp"
+#include "mkapk_tools.hpp"
+#include "mkapk_ui.hpp"
+#include "mkapk_config.hpp"
+#include "mkapk_result.hpp"
 
 namespace fs = std::filesystem;
-
-extern char** environ;
 
 /**
  * Trims leading and trailing whitespaces, newlines (\n), and carriage returns (\r)
@@ -59,42 +53,22 @@ void auto_place_system_libraries(const MkapkConfig& config, const fs::path& bin_
     const char* prefix_env = std::getenv("PREFIX");
     fs::path termux_usr_dir = prefix_env ? fs::path(prefix_env) : fs::path("/data/data/com.termux/files/usr");
     fs::path termux_global_lib = termux_usr_dir / "lib";
-    fs::path mkapk_cache_lib = termux_usr_dir / "var/lib/mkapk/lib";
+    
+    fs::path mkapk_cache_lib = MkapkEnv::get_dependency_cache_dir();
 
-    std::map<std::string, std::string> arch_to_abi_map = {
-        {"aarch64-linux-android", "arm64-v8a"},
-        {"armv7a-linux-androideabi", "armeabi-v7a"},
-        {"i686-linux-android", "x86"},
-        {"x86_64-linux-android", "x86_64"}
-    };
-
-    std::map<std::string, std::string> arch_to_sysroot_folder = {
-        {"aarch64-linux-android", "aarch64-linux-android"},
-        {"armv7a-linux-androideabi", "arm-linux-androideabi"}, 
-        {"i686-linux-android", "i686-linux-android"},
-        {"x86_64-linux-android", "x86_64-linux-android"}
-    };
-
-    std::string host_abi;
-#if defined(__aarch64__)
-    host_abi = "arm64-v8a";
-#elif defined(__arm__)
-    host_abi = "armeabi-v7a";
-#elif defined(__x86_64__)
-    host_abi = "x86_64";
-#else
-    host_abi = "x86";
-#endif
+    std::string host_abi = MkapkEnv::triplet_to_abi(MkapkEnv::get_host_arch());
 
     for (const std::string& arch_raw : arch_list) {
         std::string arch = trim_token(arch_raw);
         if (arch.empty()) continue;
-
-        std::string abi_name = arch_to_abi_map.count(arch) ? arch_to_abi_map[arch] : "unknown";
-        std::string sysroot_folder = arch_to_sysroot_folder.count(arch) ? arch_to_sysroot_folder[arch] : "unknown";
+        
+        std::string abi_name = MkapkEnv::triplet_to_abi(arch);
+        std::string sysroot_folder = MkapkEnv::ARCH_TO_SYSROOT.count(arch) 
+            ? MkapkEnv::ARCH_TO_SYSROOT.at(arch) 
+            : "unknown";
 
         if (abi_name == "unknown" || sysroot_folder == "unknown") continue;
-
+        
         fs::path target_abi_dir = bin_dir / "lib" / abi_name;
         fs::create_directories(target_abi_dir);
 
@@ -202,18 +176,13 @@ Result<void> inject_assets_and_dex(
 
     std::map<std::string, fs::path> injection_map;
     if (fs::exists(dex_file)) injection_map["classes.dex"] = dex_file;
-
-    std::map<std::string, std::string> triple_to_abi = {
-        {"aarch64-linux-android", "arm64-v8a"},
-        {"armv7a-linux-androideabi", "armeabi-v7a"},
-        {"i686-linux-android", "x86"},
-        {"x86_64-linux-android", "x86_64"}
-    };
-
+    
+    // Map architecture triplets (e.g. "aarch64-linux-android") or raw ABIs (e.g. "arm64-v8a")
     std::vector<std::string> target_abis;
     for (const auto& entry : allowed_abis) {
-        if (triple_to_abi.count(entry)) {
-            target_abis.push_back(triple_to_abi[entry]);
+        auto it = MkapkEnv::ARCH_TO_ABI.find(entry);
+        if (it != MkapkEnv::ARCH_TO_ABI.end()) {
+            target_abis.push_back(it->second);
         } else {
             target_abis.push_back(entry);
         }
@@ -261,30 +230,7 @@ Result<void> inject_assets_and_dex(
 
         // Optimization: Strip symbols from native libraries in release builds
         if (is_release && is_native_lib) {
-            std::string abs_path_str = fs::absolute(real_path).string();
-            
-            char* strip_args[] = {
-                const_cast<char*>("strip"),
-                const_cast<char*>("--strip-unneeded"),
-                const_cast<char*>(abs_path_str.c_str()),
-                nullptr
-            };
-
-            pid_t pid;
-            int spawn_status = posix_spawn(&pid, "/data/data/com.termux/files/usr/bin/strip", nullptr, nullptr, strip_args, environ);
-            
-            if (spawn_status != 0) {
-                spawn_status = posix_spawnp(&pid, "strip", nullptr, nullptr, strip_args, environ);
-            }
-
-            if (spawn_status == 0) {
-                int wait_status;
-                if (waitpid(pid, &wait_status, 0) != -1) {
-                    if (!WIFEXITED(wait_status) || WEXITSTATUS(wait_status) != 0) {
-                        UI::warn(UI::Msg::WARN_STRIP_FAIL);
-                    }
-                }
-            } 
+            MkapkEnv::run_system_cmd({"strip", "--strip-unneeded", fs::absolute(real_path).string()});
         }
 
         zip_source_t* src = zip_source_file(apk, file_to_inject.string().c_str(), 0, 0);
@@ -370,43 +316,18 @@ Result<std::pair<std::string, std::string>> handle_debug_keystore() {
         fs::create_directories(debug_ks.parent_path());
         
         std::string ks_str = debug_ks.string();
-
-        // Isolate each argument cleanly to bypass any shell macro expansions
-        char* keytool_args[] = {
-            const_cast<char*>("keytool"),
-            const_cast<char*>("-genkey"),
-            const_cast<char*>("-v"),
-            const_cast<char*>("-keystore"), const_cast<char*>(ks_str.c_str()),
-            const_cast<char*>("-storepass"), const_cast<char*>("android"),
-            const_cast<char*>("-alias"), const_cast<char*>("androiddebugkey"),
-            const_cast<char*>("-keypass"), const_cast<char*>("android"),
-            const_cast<char*>("-keyalg"), const_cast<char*>("RSA"),
-            const_cast<char*>("-keysize"), const_cast<char*>("2048"),
-            const_cast<char*>("-validity"), const_cast<char*>("10000"),
-            const_cast<char*>("-dname"), const_cast<char*>("CN=Android Debug,O=Android,C=US"),
-            nullptr
-        };
-
-        pid_t pid;
-        // Attempt invocation directly targeting Termux's standard binary path layout first
-        int spawn_status = posix_spawn(&pid, "/data/data/com.termux/files/usr/bin/keytool", nullptr, nullptr, keytool_args, environ);
         
-        // Fall back to PATH-based resolution if the absolute Termux path structure fails
-        if (spawn_status != 0) {
-            spawn_status = posix_spawnp(&pid, "keytool", nullptr, nullptr, keytool_args, environ);
-        }
-
-        if (spawn_status == 0) {
-            int wait_status;
-            if (waitpid(pid, &wait_status, 0) != -1) {
-                if (!WIFEXITED(wait_status) || WEXITSTATUS(wait_status) != 0) {
-                    UI::warn(UI::Msg::WARN_KEYSTORE_FAIL);
-                }
-            }
-        } else {
-            return Result<std::pair<std::string, std::string>>::error("Security certificate generation failure: posix_spawn failed to execute 'keytool'.");
-        }
+        MkapkEnv::run_system_cmd({
+            "keytool", "-genkey", "-v",
+            "-keystore", ks_str,
+            "-storepass", "android",
+            "-alias", "androiddebugkey",
+            "-keypass", "android",
+            "-keyalg", "RSA",
+            "-keysize", "2048",
+            "-validity", "10000",
+            "-dname", "CN=Android Debug"
+        });
     }
-    
     return Result<std::pair<std::string, std::string>>::success({debug_ks.string(), "androiddebugkey"});
 }

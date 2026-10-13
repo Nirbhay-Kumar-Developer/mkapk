@@ -1,7 +1,6 @@
 #include <iostream>
-#include <vector>
 #include <string>
-#include <algorithm>
+#include <vector>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -9,8 +8,12 @@
 #include <regex>
 #include <sstream>
 #include <iomanip>
+#include <iterator>
+#include <utility>
+
 #define XXH_INLINE_ALL
 #include <xxhash.h>
+
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_config.hpp"

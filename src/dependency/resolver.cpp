@@ -1,15 +1,14 @@
-#include <iostream>
 #include <vector>
 #include <string>
 #include <sstream>
 #include <algorithm>
 #include <filesystem>
-#include <cctype>
 
 #include "mkapk_resolver.hpp"
-#include "mkapk_helpers.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_ipc.hpp"
+#include "mkapk_config.hpp"
+#include "mkapk_result.hpp"
 
 namespace MkapkResolver {
 
@@ -38,7 +37,7 @@ static std::string trim(const std::string& str) {
     return str.substr(first, (last - first + 1));
 }
 
-std::vector<std::string> resolve_dependencies(const std::vector<std::string>& coordinates, const MkapkConfig& config) {
+std::vector<std::string> resolve_dependencies(const std::vector<std::string>& coordinates, const MkapkConfig&  /*config*/) {
     std::vector<std::string> resolved_paths;
     if (coordinates.empty()) return resolved_paths;
 
@@ -69,10 +68,7 @@ std::vector<std::string> resolve_dependencies(const std::vector<std::string>& co
 
     // 4. Post-Resolution Fallback: On-disk cache discovery if daemon output was missing
     if (resolved_paths.empty()) {
-        const char* prefix_env = std::getenv("PREFIX");
-        std::filesystem::path local_cache = prefix_env 
-            ? std::filesystem::path(prefix_env) / "var/lib/mkapk/lib" 
-            : "/data/data/com.termux/files/usr/var/lib/mkapk/lib";
+        std::filesystem::path local_cache = MkapkEnv::get_dependency_cache_dir();
 
         for (const auto& coordinate : coordinates) {
             std::vector<std::string> coords = split_tokens(coordinate, ':');
@@ -81,7 +77,6 @@ std::vector<std::string> resolve_dependencies(const std::vector<std::string>& co
                 std::string artifact_id = coords[1];
                 std::string version = (coords.size() == 3) ? coords[2] : coords.back();
 
-                // FIX: Convert group_id dots to folder slashes (e.g., androidx.core -> androidx/core)
                 std::string group_path = group_id;
                 std::replace(group_path.begin(), group_path.end(), '.', '/');
 

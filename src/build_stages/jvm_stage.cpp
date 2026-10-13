@@ -1,68 +1,19 @@
+#include <vector>
+#include <cstdlib>
+#include <fstream>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <utility>
 #include "pipeline_stage.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_helpers.hpp"
-#include <cstdlib>
-#include <fstream>
-#include <set>
-#include <algorithm>
+#include "mkapk_extractor.hpp"
+#include "mkapk_config.hpp"
+#include "mkapk_result.hpp"
+#include "mkapk_tools.hpp"
 
 namespace fs = std::filesystem;
-
-static std::vector<fs::path> resolve_all_dependency_jars(const fs::path& build_dir) {
-    std::vector<fs::path> jars;
-    std::set<std::string> seen;
-
-    fs::path deps_manifest = build_dir / "dependencies.txt";
-    if (!fs::exists(deps_manifest)) {
-        return jars;
-    }
-
-    std::ifstream in(deps_manifest);
-    std::string line;
-    while (std::getline(in, line)) {
-        if (line.empty()) continue;
-        if (line.back() == '\r') line.pop_back();
-
-        fs::path p(line);
-        if (!fs::exists(p)) continue;
-
-        // 1. Direct JAR dependencies
-        if (p.extension() == ".jar") {
-            std::string abs_path = fs::absolute(p).string();
-            if (seen.insert(abs_path).second) {
-                jars.push_back(p);
-            }
-        }
-        // 2. Extracted AAR artifacts
-        else if (p.extension() == ".aar") {
-            fs::path aar_dir = p.parent_path();
-
-            // Primary bytecode container
-            fs::path classes_jar = aar_dir / "classes.jar";
-            if (fs::exists(classes_jar)) {
-                std::string abs_classes = fs::absolute(classes_jar).string();
-                if (seen.insert(abs_classes).second) {
-                    jars.push_back(classes_jar);
-                }
-            }
-
-            // Embedded secondary jars (e.g., emoji2/libs/repackaged.jar)
-            fs::path inner_libs = aar_dir / "libs";
-            if (fs::exists(inner_libs) && fs::is_directory(inner_libs)) {
-                for (const auto& entry : fs::directory_iterator(inner_libs)) {
-                    if (entry.is_regular_file() && entry.path().extension() == ".jar") {
-                        std::string abs_inner = fs::absolute(entry.path()).string();
-                        if (seen.insert(abs_inner).second) {
-                            jars.push_back(entry.path());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    return jars;
-}
 
 Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) {
     fs::path java_out = ctx.build_dir / "classes" / "java_classes";
@@ -70,7 +21,8 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
     fs::create_directories(dex_cache);
 
     // 1. Construct the complete classpath dynamically from dependencies.txt
-    std::vector<fs::path> extra_jvm_classpaths = resolve_all_dependency_jars(ctx.build_dir);
+    auto dep_artifacts = MkapkExtractor::load_project_dependencies(ctx.build_dir);
+    std::vector<fs::path> extra_jvm_classpaths = std::move(dep_artifacts.jvm_classpath_jars);
 
     // Ensure kotlin-stdlib is present on classpath if not explicitly resolved
     bool has_kotlin_stdlib = false;

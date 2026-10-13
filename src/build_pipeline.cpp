@@ -1,16 +1,18 @@
-#include <iostream>
 #include <vector>
 #include <string>
 #include <filesystem>
 #include <algorithm>
-#include <memory>
+#include <future>
 #include <stdexcept>
+#include <map>
+#include <utility>
+
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
-#include "mkapk_ui.hpp"
 #include "mkapk_config.hpp"
 #include "mkapk_plugin_manager.hpp"
 #include "pipeline_stage.hpp"
+#include "mkapk_result.hpp"
 
 namespace fs = std::filesystem;
 
@@ -51,19 +53,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
     } else if (!ctx.arch_target.empty()) {
         ctx.compile_architectures = { ctx.arch_target };
     } else {
-        std::string host_arch;
-#if defined(__aarch64__)
-        host_arch = "aarch64-linux-android";
-#elif defined(__arm__)
-        host_arch = "armv7a-linux-androideabi";
-#elif defined(__x86_64__)
-        host_arch = "x86_64-linux-android";
-#elif defined(__i386__) || defined(__i686__)
-        host_arch = "i686-linux-android";
-#else
-        host_arch = "aarch64-linux-android";
-#endif
-        ctx.compile_architectures = { host_arch };
+        ctx.compile_architectures = { MkapkEnv::get_host_arch() };
     }
 
     auto [diff, new_state] = check_changes(ctx.build_dir, config, ctx.force_all, ctx.is_release);
@@ -74,37 +64,55 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         return "up-to-date";
     }
 
-    // Invalidate resource linking if resources, manifest, or config.json shifted
     ctx.resources_triggered = (ctx.diff.res_changed || ctx.diff.manifest_changed || ctx.diff.config_changed || ctx.force_all);
 
-    // If config.json changed, populate source batches to ensure all code is recompiled
-    if (ctx.diff.config_changed && fs::exists(ctx.src_dir)) {
+    // Deduplicated source scanner helper
+    auto enqueue_all_sources = [&]() {
+        if (!fs::exists(ctx.src_dir)) return;
         for (const auto& entry : fs::recursive_directory_iterator(ctx.src_dir)) {
             if (!entry.is_regular_file()) continue;
             std::string ext = entry.path().extension().string();
             if (ext == ".java") {
-                if (std::find(ctx.diff.changed_files["java"].begin(), ctx.diff.changed_files["java"].end(), entry.path()) == ctx.diff.changed_files["java"].end()) {
-                    ctx.diff.changed_files["java"].push_back(entry.path());
+                auto& java_files = ctx.diff.changed_files["java"];
+                if (std::find(java_files.begin(), java_files.end(), entry.path()) == java_files.end()) {
+                    java_files.push_back(entry.path());
                 }
             } else if (ext == ".kt") {
-                if (std::find(ctx.diff.changed_files["kotlin"].begin(), ctx.diff.changed_files["kotlin"].end(), entry.path()) == ctx.diff.changed_files["kotlin"].end()) {
-                    ctx.diff.changed_files["kotlin"].push_back(entry.path());
+                auto& kt_files = ctx.diff.changed_files["kotlin"];
+                if (std::find(kt_files.begin(), kt_files.end(), entry.path()) == kt_files.end()) {
+                    kt_files.push_back(entry.path());
                 }
             }
         }
+    };
+
+    if (ctx.diff.config_changed) {
+        enqueue_all_sources();
     }
 
-    // 1. Dependency Resolution & Cache Writing
+    // 1. Dependency Resolution & Cache Writing (Runs first)
     DependencyStage dep_stage;
     Result<void> res_dep = dep_stage.execute(config, ctx);
     if (res_dep.is_err()) {
         throw std::runtime_error("Dependency resolution failure: " + res_dep.get_error());
     }
 
-    // 2. Resource Compilation and AAPT2 Manifest/Symbol Linking
+    // 2. Launch ResourceStage and NativeStage concurrently
     ResourceStage res_stage;
-    Result<void> res_resource = res_stage.execute(config, ctx);
+    NativeStage native_stage;
+
+    auto native_future = std::async(std::launch::async, [&]() -> Result<void> {
+        return native_stage.execute(config, ctx);
+    });
+
+    auto resource_future = std::async(std::launch::async, [&]() -> Result<void> {
+        return res_stage.execute(config, ctx);
+    });
+
+    // Await ResourceStage to verify AAPT2 symbol output
+    Result<void> res_resource = resource_future.get();
     if (res_resource.is_err()) {
+        if (native_future.valid()) native_future.wait();
         throw std::runtime_error("Resource pipeline failure: " + res_resource.get_error());
     }
 
@@ -120,39 +128,28 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         ctx.diff.needs_repackage = true;
         ctx.new_state["meta|r_txt"] = post_link_r_hash;
 
-        // Populate both Java and Kotlin source lists so all dependent code rebinds IDs
-        if (fs::exists(ctx.src_dir)) {
-            for (const auto& entry : fs::recursive_directory_iterator(ctx.src_dir)) {
-                if (!entry.is_regular_file()) continue;
-                std::string ext = entry.path().extension().string();
-                if (ext == ".java") {
-                    if (std::find(ctx.diff.changed_files["java"].begin(), ctx.diff.changed_files["java"].end(), entry.path()) == ctx.diff.changed_files["java"].end()) {
-                        ctx.diff.changed_files["java"].push_back(entry.path());
-                    }
-                } else if (ext == ".kt") {
-                    if (std::find(ctx.diff.changed_files["kotlin"].begin(), ctx.diff.changed_files["kotlin"].end(), entry.path()) == ctx.diff.changed_files["kotlin"].end()) {
-                        ctx.diff.changed_files["kotlin"].push_back(entry.path());
-                    }
-                }
-            }
-        }
+        enqueue_all_sources();
     }
 
-    // 4. Native C/C++ Compilation (Internal parallel workers handle ABI matrices safely)
-    NativeStage native_stage;
-    Result<void> res_native = native_stage.execute(config, ctx);
+    // 4. Launch JvmStage concurrently alongside running NativeStage
+    JvmStage jvm_stage;
+    auto jvm_future = std::async(std::launch::async, [&]() -> Result<void> {
+        return jvm_stage.execute(config, ctx);
+    });
+
+    // 5. Await both NativeStage and JvmStage completion
+    Result<void> res_native = native_future.get();
     if (res_native.is_err()) {
+        if (jvm_future.valid()) jvm_future.wait();
         throw std::runtime_error("Native compilation failure: " + res_native.get_error());
     }
 
-    // 5. Java/Kotlin Compilation, D8/R8 Dexing & Dependency JAR Batching
-    JvmStage jvm_stage;
-    Result<void> res_jvm = jvm_stage.execute(config, ctx);
+    Result<void> res_jvm = jvm_future.get();
     if (res_jvm.is_err()) {
         throw std::runtime_error("JVM pipeline failure: " + res_jvm.get_error());
     }
 
-    // 6. Packaging, Zipalign, and Apksigner
+    // 6. Packaging, Zipalign, and Apksigner (Runs after all stages finish)
     PackageStage pkg_stage;
     Result<void> res_pack = pkg_stage.execute(config, ctx);
     if (res_pack.is_err()) {

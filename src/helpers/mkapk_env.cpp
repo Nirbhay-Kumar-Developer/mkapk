@@ -1,22 +1,16 @@
 #define _POSIX_C_SOURCE 200112L
-#include <iostream>
+#include <spawn.h>
 #include <fstream>
 #include <string>
 #include <vector>
 #include <filesystem>
 #include <cstdlib>
 #include <map>
-#include <algorithm>
-#include <sstream>
 #include <sys/wait.h>
-#include <unistd.h>
 #include <nlohmann/json.hpp>
 #include "mkapk_helpers.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_config.hpp"
-#include <spawn.h>
-#include <chrono>
-#include <random>
 
 extern char** environ;
 namespace fs = std::filesystem;

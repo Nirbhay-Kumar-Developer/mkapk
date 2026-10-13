@@ -1,25 +1,23 @@
-#include <iostream>
+#define _POSIX_C_SOURCE 200809L
+#include <unistd.h>
+#include <sys/wait.h>
+#include <spawn.h>
 #include <vector>
+#include <iostream>
 #include <string>
 #include <filesystem>
 #include <algorithm>
-#include <functional>
 #include <set>
 #include <fstream>
-#include <sstream>
-#include <map>
-#include "mkapk_helpers.hpp"
+
 #include "mkapk_ui.hpp"
-#include <unistd.h>
-#include <sys/wait.h>
-#include <poll.h>
-#include <spawn.h>
+#include "mkapk_config.hpp"
+#include "mkapk_result.hpp"
+#include "mkapk_tools.hpp"
 
 namespace fs = std::filesystem;
 
 extern char** environ;
-
-using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 Result<void> compile_resources(
     const std::string& AAPT2,
@@ -92,14 +90,32 @@ Result<void> compile_resources(
     return Result<void>::success();
 }
 
+static std::string extract_manifest_package(const fs::path& manifest_path) {
+    if (!fs::exists(manifest_path)) return "";
+    std::ifstream mf(manifest_path);
+    std::string line;
+    while (std::getline(mf, line)) {
+        size_t pkg_pos = line.find("package=\"");
+        if (pkg_pos != std::string::npos) {
+            size_t start = pkg_pos + 9;
+            size_t end = line.find('"', start);
+            if (end != std::string::npos) {
+                return line.substr(start, end - start);
+            }
+            break;
+        }
+    }
+    return "";
+}
+
 Result<void> link_manifest(
     const std::string& AAPT2,
     const fs::path& unsigned_apk,
     const fs::path& android_jar,
     const fs::path& manifest,
     const fs::path& bin_dir,
-    const fs::path& src_dir,
-    RunFunc run_func,
+    const fs::path&,
+    RunFunc,
     bool debug)
 {
     UI::stage(UI::Msg::STAGE_RES_LINK);
@@ -134,59 +150,18 @@ Result<void> link_manifest(
     };
 
     // 1. Discover primary application package
-    std::string primary_package = "";
-    if (fs::exists(manifest)) {
-        std::ifstream mf(manifest);
-        std::string line;
-        while (std::getline(mf, line)) {
-            size_t pkg_pos = line.find("package=\"");
-            if (pkg_pos != std::string::npos) {
-                size_t start = pkg_pos + 9;
-                size_t end = line.find("\"", start);
-                if (end != std::string::npos) {
-                    primary_package = line.substr(start, end - start);
-                }
-                break;
-            }
-        }
-    }
+    std::string primary_package = extract_manifest_package(manifest);
 
-    // 2. Discover library packages and their corresponding R.txt files
+    // 2. Discover library packages from dependency manifests
     std::set<std::string> extra_packages;
-    std::vector<std::string> library_r_txt_files;
-
-    const char* prefix_env = std::getenv("PREFIX");
-    fs::path cache_root = prefix_env
-        ? fs::path(prefix_env) / "var/lib/mkapk/lib"
-        : fs::path("/data/data/com.termux/files/usr/var/lib/mkapk/lib");
+    fs::path cache_root = MkapkEnv::get_dependency_cache_dir();
 
     if (fs::exists(cache_root)) {
         for (const auto& entry : fs::recursive_directory_iterator(cache_root)) {
             if (entry.is_regular_file() && entry.path().filename() == "AndroidManifest.xml") {
-                fs::path lib_dir = entry.path().parent_path();
-
-                std::ifstream lib_mf(entry.path());
-                std::string line;
-                std::string pkg = "";
-                while (std::getline(lib_mf, line)) {
-                    size_t pkg_pos = line.find("package=\"");
-                    if (pkg_pos != std::string::npos) {
-                        size_t start = pkg_pos + 9;
-                        size_t end = line.find("\"", start);
-                        if (end != std::string::npos) {
-                            pkg = line.substr(start, end - start);
-                        }
-                        break;
-                    }
-                }
-
+                std::string pkg = extract_manifest_package(entry.path());
                 if (!pkg.empty() && pkg != primary_package) {
                     extra_packages.insert(pkg);
-                }
-
-                fs::path lib_r_txt = lib_dir / "R.txt";
-                if (fs::exists(lib_r_txt) && fs::file_size(lib_r_txt) > 0) {
-                    library_r_txt_files.push_back(fs::absolute(lib_r_txt).string());
                 }
             }
         }
@@ -194,12 +169,10 @@ Result<void> link_manifest(
 
     // 3. Inject --extra-packages
     if (!extra_packages.empty()) {
-        std::string extra_pkgs_str = "";
-        for (auto it = extra_packages.begin(); it != extra_packages.end(); ++it) {
-            extra_pkgs_str += *it;
-            if (std::next(it) != extra_packages.end()) {
-                extra_pkgs_str += ":";
-            }
+        std::string extra_pkgs_str;
+        for (const auto& pkg : extra_packages) {
+            if (!extra_pkgs_str.empty()) extra_pkgs_str += ":";
+            extra_pkgs_str += pkg;
         }
         args.push_back("--extra-packages");
         args.push_back(extra_pkgs_str);
@@ -225,92 +198,84 @@ Result<void> link_manifest(
     }
 
     std::sort(library_archives.begin(), library_archives.end());
-    std::sort(library_r_txt_files.begin(), library_r_txt_files.end());
 
-    // Inject compiled library resources via -R
+    // Inject compiled library archives via -R
     for (const auto& arc : library_archives) {
         args.push_back("-R");
         args.push_back(arc);
     }
 
-    // 5. Execution Wrapper: Direct filtering of aapt2 stderr noise without global system alterations
-    auto filtered_aapt2_run = [](const std::vector<std::string>& cmd_args) -> Result<void> {
-        int err_pipe[2];
-        if (pipe(err_pipe) == -1) {
-            return Result<void>::error("Failed to allocate pipe descriptors for AAPT2 link execution.");
-        }
+    // 5. Execution Wrapper: Pipe stderr through posix_spawnp to filter bionic liblog dumps
+    int err_pipe[2];
+    if (pipe(err_pipe) == -1) {
+        return Result<void>::error("FATAL ERROR");
+    }
 
-        posix_spawn_file_actions_t actions;
-        posix_spawn_file_actions_init(&actions);
-        posix_spawn_file_actions_adddup2(&actions, err_pipe[1], STDERR_FILENO);
-        posix_spawn_file_actions_addclose(&actions, err_pipe[0]);
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, err_pipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, err_pipe[0]);
 
-        std::vector<char*> c_args;
-        c_args.reserve(cmd_args.size() + 1);
-        for (const auto& arg : cmd_args) {
-            c_args.push_back(const_cast<char*>(arg.c_str()));
-        }
-        c_args.push_back(nullptr);
+    std::vector<char*> c_args;
+    c_args.reserve(args.size() + 1);
+    for (const auto& arg : args) {
+        c_args.push_back(const_cast<char*>(arg.c_str()));
+    }
+    c_args.push_back(nullptr);
 
-        pid_t pid;
-        int spawn_status = posix_spawnp(&pid, c_args[0], &actions, nullptr, c_args.data(), environ);
-        posix_spawn_file_actions_destroy(&actions);
-        close(err_pipe[1]);
+    pid_t pid;
+    int spawn_status = posix_spawnp(&pid, c_args[0], &actions, nullptr, c_args.data(), environ);
+    posix_spawn_file_actions_destroy(&actions);
+    close(err_pipe[1]);
 
-        if (spawn_status != 0) {
-            close(err_pipe[0]);
-            return Result<void>::error("posix_spawnp failed to launch AAPT2 binary.");
-        }
-
-        // Buffer and filter stream directly
-        std::string line_buffer;
-        char chunk[2048];
-        ssize_t bytes_read;
-
-        while ((bytes_read = read(err_pipe[0], chunk, sizeof(chunk) - 1)) > 0) {
-            chunk[bytes_read] = '\0';
-            line_buffer += chunk;
-
-            size_t newline_idx;
-            while ((newline_idx = line_buffer.find('\n')) != std::string::npos) {
-                std::string line = line_buffer.substr(0, newline_idx);
-                line_buffer.erase(0, newline_idx + 1);
-
-                // Silences the internal bionic liblog package ID table dumps
-                if (line.find("No package ID") != std::string::npos ||
-                    line.find("E aapt2   :") != std::string::npos) {
-                    continue;
-                }
-
-                // Legitimate linker errors (syntax errors, missing themes, broken manifests)
-                if (!line.empty()) {
-                    std::cerr << line << '\n';
-                }
-            }
-        }
+    if (spawn_status != 0) {
         close(err_pipe[0]);
+        return Result<void>::error("FATAL ERROR");
+    }
 
-        if (!line_buffer.empty()) {
-            if (line_buffer.find("No package ID") == std::string::npos &&
-                line_buffer.find("E aapt2   :") == std::string::npos) {
-                std::cerr << line_buffer << '\n';
+    // Buffer and filter stream directly
+    std::string line_buffer;
+    char chunk[2048];
+    ssize_t bytes_read;
+
+    while ((bytes_read = read(err_pipe[0], chunk, sizeof(chunk) - 1)) > 0) {
+        chunk[bytes_read] = '\0';
+        line_buffer += chunk;
+
+        size_t newline_idx;
+        while ((newline_idx = line_buffer.find('\n')) != std::string::npos) {
+            std::string line = line_buffer.substr(0, newline_idx);
+            line_buffer.erase(0, newline_idx + 1);
+
+            // Silences internal bionic liblog package ID table dumps
+            if (line.find("No package ID") != std::string::npos ||
+                line.find("E aapt2   :") != std::string::npos) {
+                continue;
+            }
+
+            if (!line.empty()) {
+                std::cerr << line << '\n';
             }
         }
-        std::cerr.flush();
+    }
+    close(err_pipe[0]);
 
-        int wait_status;
-        if (waitpid(pid, &wait_status, 0) != -1) {
-            if (WIFEXITED(wait_status) && WEXITSTATUS(wait_status) == 0) {
-                return Result<void>::success();
-            }
+    if (!line_buffer.empty()) {
+        if (line_buffer.find("No package ID") == std::string::npos &&
+            line_buffer.find("E aapt2   :") == std::string::npos) {
+            std::cerr << line_buffer << '\n';
         }
-        return Result<void>::error("AAPT2 link processing failed.");
-    };
+    }
+    std::cerr.flush();
 
-    auto res = filtered_aapt2_run(args);
-    if (res.is_err()) return res;
+    int wait_status;
+    if (waitpid(pid, &wait_status, 0) != -1) {
+        if (WIFEXITED(wait_status) && WEXITSTATUS(wait_status) == 0) {
+            return Result<void>::success();
+        }
+    }
 
-    return Result<void>::success();
+    return Result<void>::error("AAPT2 link processing failed.");
 }
 
 fs::path obfuscate_resources(

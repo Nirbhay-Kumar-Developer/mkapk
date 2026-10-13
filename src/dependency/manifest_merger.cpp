@@ -1,11 +1,10 @@
-#include <iostream>
 #include <vector>
 #include <string>
 #include <filesystem>
-#include <sstream>
+#include <exception>
+#include <system_error>
 
 #include "mkapk_manifest_merger.hpp"
-#include "mkapk_helpers.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_ipc.hpp"
 

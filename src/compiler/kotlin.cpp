@@ -1,18 +1,15 @@
-#include <iostream>
 #include <vector>
 #include <string>
 #include <filesystem>
 #include <fstream>
-#include <algorithm>
-#include <functional>
 #include <set>
-#include "mkapk_helpers.hpp"
+#include <cstdlib>
+
 #include "mkapk_ui.hpp"
 #include "mkapk_result.hpp"
+#include "mkapk_tools.hpp"
 
 namespace fs = std::filesystem;
-
-using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 Result<void> compile_incremental_kotlin(
     const std::string& KOTLINC,

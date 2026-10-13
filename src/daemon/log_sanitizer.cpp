@@ -1,3 +1,7 @@
+#include <vector>
+#include <iostream>
+#include <string>
+
 #include "mkapk_log_sanitizer.hpp"
 #include "mkapk_ui.hpp"
 

@@ -3,18 +3,16 @@
 #include <string>
 #include <algorithm>
 #include <filesystem>
-#include <sstream>
+#include <cstdio>
+#include <exception>
+#include <mutex>
 #include "mkapk_helpers.hpp"
-#include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_plugin_manager.hpp"
 #include "mkapk_ipc.hpp"
+#include "mkapk_config.hpp"
 
 namespace fs = std::filesystem;
-
-#ifndef SHARE_PATH
-   #define SHARE_PATH "/data/data/com.termux/files/usr/share/mkapk/"
-#endif
 
 void show_help() {
     std::lock_guard<std::mutex> lock(UI::get_console_mutex());

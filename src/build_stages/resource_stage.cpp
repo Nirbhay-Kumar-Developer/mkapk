@@ -1,47 +1,20 @@
-#include "pipeline_stage.hpp"
-#include "mkapk_ui.hpp"
-#include "mkapk_helpers.hpp"
-#include <cstdlib>
-#include <fstream>
-#include <set>
+#include <vector>
 #include <sstream>
 #include <iomanip>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <utility>
+
+#include "pipeline_stage.hpp"
+#include "mkapk_extractor.hpp"
+#include "mkapk_result.hpp"
+#include "mkapk_tools.hpp"
+
 #define XXH_INLINE_ALL
 #include <xxhash.h>
 
 namespace fs = std::filesystem;
-
-static std::vector<fs::path> resolve_all_dependency_res_dirs(const fs::path& build_dir) {
-    std::vector<fs::path> res_dirs;
-    std::set<std::string> seen;
-
-    fs::path deps_manifest = build_dir / "dependencies.txt";
-    if (!fs::exists(deps_manifest)) {
-        return res_dirs;
-    }
-
-    std::ifstream in(deps_manifest);
-    std::string line;
-    while (std::getline(in, line)) {
-        if (line.empty()) continue;
-        if (line.back() == '\r') line.pop_back();
-
-        fs::path p(line);
-        if (!fs::exists(p)) continue;
-
-        if (p.extension() == ".aar") {
-            fs::path ext_res = p.parent_path() / "res";
-            if (fs::exists(ext_res) && !fs::is_empty(ext_res)) {
-                std::string abs_path = fs::absolute(ext_res).string();
-                if (seen.insert(abs_path).second) {
-                    res_dirs.push_back(ext_res);
-                }
-            }
-        }
-    }
-
-    return res_dirs;
-}
 
 // Generate collision-free names for arbitrarily nested Maven paths
 static std::string get_stable_flata_name(const fs::path& extra_res) {
@@ -52,7 +25,7 @@ static std::string get_stable_flata_name(const fs::path& extra_res) {
     return ss.str();
 }
 
-Result<void> ResourceStage::execute(const MkapkConfig& config, PipelineContext& ctx) {
+Result<void> ResourceStage::execute(const MkapkConfig&  /*config*/, PipelineContext& ctx) {
     fs::path flat_dir = ctx.build_dir / "flat_res";
     fs::create_directories(flat_dir);
 
@@ -65,7 +38,9 @@ Result<void> ResourceStage::execute(const MkapkConfig& config, PipelineContext& 
     }
 
     // 2. Gather extracted AAR dependency resource folders from dependencies.txt
-    std::vector<fs::path> lib_res_dirs = resolve_all_dependency_res_dirs(ctx.build_dir);
+    auto dep_artifacts = MkapkExtractor::load_project_dependencies(ctx.build_dir);
+    std::vector<fs::path> lib_res_dirs = std::move(dep_artifacts.res_directories);
+ 
     bool missing_flata = false;
 
     for (const auto& extra_res : lib_res_dirs) {

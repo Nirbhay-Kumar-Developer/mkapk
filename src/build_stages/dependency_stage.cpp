@@ -1,13 +1,18 @@
+#include <vector>
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <filesystem>
+#include <string>
+
 #include "pipeline_stage.hpp"
 #include "mkapk_resolver.hpp"
 #include "mkapk_extractor.hpp"
 #include "mkapk_manifest_merger.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_tools.hpp"
-#include <algorithm>
-#include <fstream>
-#include <sstream>
-#include <functional>
+#include "mkapk_config.hpp"
+#include "mkapk_result.hpp"
 
 namespace fs = std::filesystem;
 
@@ -79,16 +84,8 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
         MkapkExtractor::extract_all(ctx.all_resolved_artifacts);
 
         // Save resolved list to the project build cache
-        std::ofstream mf(deps_manifest_file);
-        for (const auto& art_path : ctx.all_resolved_artifacts) {
-            mf << art_path << "\n";
-        }
-        mf.close();
+        MkapkExtractor::save_project_dependencies(ctx.build_dir, ctx.all_resolved_artifacts);
 
-        // Update dependencies configuration hash
-        std::ofstream hf(dep_hash_file);
-        hf << current_deps_hash;
-        hf.close();
     } else {
         UI::info("Dependencies configuration up-to-date. Using cached resolution graph.");
         ctx.all_resolved_artifacts = cached_artifacts;

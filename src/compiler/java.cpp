@@ -1,17 +1,12 @@
-#include <iostream>
 #include <vector>
 #include <string>
 #include <filesystem>
 #include <algorithm>
-#include <functional>
-#include "mkapk_helpers.hpp"
+
 #include "mkapk_tools.hpp"
-#include "mkapk_ui.hpp"
 #include "mkapk_result.hpp"
 
 namespace fs = std::filesystem;
-
-using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 Result<void> compile_incremental_java(
     const std::string& version,

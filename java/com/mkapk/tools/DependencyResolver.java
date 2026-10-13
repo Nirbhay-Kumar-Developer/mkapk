@@ -1,24 +1,17 @@
 package com.mkapk.tools;
 
-import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
-import org.eclipse.aether.DefaultRepositorySystemSession;
 import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.RepositorySystemSession;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
-import org.eclipse.aether.artifact.DefaultArtifactType;
 import org.eclipse.aether.collection.CollectRequest;
 import org.eclipse.aether.collection.CollectResult;
-import org.eclipse.aether.collection.DependencyCollectionContext;
 import org.eclipse.aether.collection.DependencyCollectionException;
-import org.eclipse.aether.collection.DependencySelector;
-import org.eclipse.aether.collection.DependencyTraverser;
 import org.eclipse.aether.graph.Dependency;
 import org.eclipse.aether.graph.DependencyNode;
-import org.eclipse.aether.repository.LocalRepository;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.resolution.ArtifactRequest;
 import org.eclipse.aether.resolution.ArtifactResult;
-import org.eclipse.aether.util.artifact.DefaultArtifactTypeRegistry;
 import org.eclipse.aether.util.artifact.JavaScopes;
 import org.eclipse.aether.util.graph.visitor.PreorderNodeListGenerator;
 
@@ -36,51 +29,16 @@ public class DependencyResolver implements ToolHandler {
     }
 
     private static File getLocalCacheDir() {
-        String prefix = System.getenv("PREFIX");
-        if (prefix == null || prefix.isEmpty()) {
-            prefix = System.getProperty("user.home") + "/.mkapk";
+        String home = System.getenv("HOME");
+        if (home == null || home.isEmpty()) {
+            home = System.getProperty("user.home");
         }
-        File cacheDir = new File(prefix, "var/lib/mkapk/lib");
+        File cacheDir = new File(home, ".mkapk/lib");
+
         if (!cacheDir.exists()) {
             cacheDir.mkdirs();
         }
         return cacheDir;
-    }
-
-    /**
-     * Retains compile, runtime, and optional dependencies,
-     * discarding only test and provided scopes.
-     */
-    private static class PermissiveDependencySelector implements DependencySelector {
-        @Override
-        public boolean selectDependency(Dependency dependency) {
-            if (dependency == null) return false;
-            String scope = dependency.getScope();
-            return !JavaScopes.TEST.equalsIgnoreCase(scope)
-                    && !JavaScopes.PROVIDED.equalsIgnoreCase(scope)
-                    && !"system".equalsIgnoreCase(scope);
-        }
-
-        @Override
-        public DependencySelector deriveChildSelector(DependencyCollectionContext context) {
-            return this;
-        }
-    }
-
-    /**
-     * Forces Aether to traverse into child POMs for every dependency,
-     * preventing optional runtime components from being skipped.
-     */
-    private static class AllDependencyTraverser implements DependencyTraverser {
-        @Override
-        public boolean traverseDependency(Dependency dependency) {
-            return true;
-        }
-
-        @Override
-        public DependencyTraverser deriveChildTraverser(DependencyCollectionContext context) {
-            return this;
-        }
     }
 
     @Override
@@ -91,22 +49,9 @@ public class DependencyResolver implements ToolHandler {
         }
 
         RepositorySystem system = Booter.newRepositorySystem();
-        DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
-        LocalRepository localRepo = new LocalRepository(getLocalCacheDir());
-        session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
+        RepositorySystemSession session = Booter.newRepositorySystemSession(system, getLocalCacheDir());
 
-        // Enforce full graph traversal without scope/optional pruning in Resolver 2.x
-        session.setDependencySelector(new PermissiveDependencySelector());
-        session.setDependencyTraverser(new AllDependencyTraverser());
-        session.setConfigProperty("aether.dependencyCollector.useSkip", false);
-
-        // Register AAR and JAR packaging handlers
-        DefaultArtifactTypeRegistry typeRegistry = new DefaultArtifactTypeRegistry();
-        typeRegistry.add(new DefaultArtifactType("aar", "aar", "", "java", false, true));
-        typeRegistry.add(new DefaultArtifactType("jar", "jar", "", "java", false, false));
-        session.setArtifactTypeRegistry(typeRegistry);
-
-        // Repositories
+        // Remote repositories
         RemoteRepository google = new RemoteRepository.Builder("google", "default", "https://dl.google.com/dl/android/maven2/").build();
         RemoteRepository central = new RemoteRepository.Builder("central", "default", "https://repo1.maven.org/maven2/").build();
         List<RemoteRepository> repos = Arrays.asList(google, central);

@@ -1,20 +1,22 @@
-#include <iostream>
+#include <zip.h>
+#include <__ostream/basic_ostream.h>
 #include <vector>
+#include <zipconf.h>
 #include <string>
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
-#include <functional>
 #include <set>
 #include <cstdlib>
-#include <zip.h>
+#include <utility>
+
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
 #include "mkapk_result.hpp"
+#include "mkapk_config.hpp"
+#include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
-
-using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
 
 /**
  * Utility to collect all compiled .class files.
@@ -268,9 +270,7 @@ Result<void> run_dex_r8(
         }
 
         // Path C: Recursively scan the mkapk library cache for any loose rule files
-        fs::path mkapk_cache_lib = prefix_env 
-            ? fs::path(prefix_env) / "var/lib/mkapk/lib" 
-            : fs::path("/data/data/com.termux/files/usr/var/lib/mkapk/lib");
+        fs::path mkapk_cache_lib = MkapkEnv::get_dependency_cache_dir();
 
         if (fs::exists(mkapk_cache_lib)) {
             for (const auto& entry : fs::recursive_directory_iterator(mkapk_cache_lib)) {
