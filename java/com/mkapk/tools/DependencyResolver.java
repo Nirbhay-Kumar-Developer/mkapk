@@ -14,6 +14,9 @@ import org.eclipse.aether.resolution.ArtifactRequest;
 import org.eclipse.aether.resolution.ArtifactResult;
 import org.eclipse.aether.util.artifact.JavaScopes;
 import org.eclipse.aether.util.graph.visitor.PreorderNodeListGenerator;
+import org.eclipse.aether.util.version.GenericVersionScheme;
+import org.eclipse.aether.version.Version;
+import org.eclipse.aether.version.VersionScheme;
 
 import java.io.File;
 import java.io.PrintStream;
@@ -92,7 +95,9 @@ public class DependencyResolver implements ToolHandler {
         PreorderNodeListGenerator nlg = new PreorderNodeListGenerator();
         collectResult.getRoot().accept(nlg);
 
-        Map<String, File> mediatedArtifacts = new LinkedHashMap<>();
+        // PASS 1: Mediate Highest Version Wins for all Group:Artifact pairs
+        VersionScheme versionScheme = new GenericVersionScheme();
+        Map<String, Artifact> bestArtifacts = new LinkedHashMap<>();
         List<DependencyNode> nodes = nlg.getNodes();
 
         for (DependencyNode node : nodes) {
@@ -106,9 +111,27 @@ public class DependencyResolver implements ToolHandler {
 
             Artifact art = dep.getArtifact();
             String gaKey = art.getGroupId() + ":" + art.getArtifactId();
-            if (mediatedArtifacts.containsKey(gaKey)) {
-                continue;
+
+            if (!bestArtifacts.containsKey(gaKey)) {
+                bestArtifacts.put(gaKey, art);
+            } else {
+                Artifact currentBest = bestArtifacts.get(gaKey);
+                try {
+                    Version currentVersion = versionScheme.parseVersion(currentBest.getVersion());
+                    Version candidateVersion = versionScheme.parseVersion(art.getVersion());
+                    if (candidateVersion.compareTo(currentVersion) > 0) {
+                        bestArtifacts.put(gaKey, art);
+                    }
+                } catch (Exception ignored) {}
             }
+        }
+
+        // PASS 2: Resolve the winning mediated artifacts
+        Map<String, File> mediatedArtifacts = new LinkedHashMap<>();
+
+        for (Map.Entry<String, Artifact> entry : bestArtifacts.entrySet()) {
+            String gaKey = entry.getKey();
+            Artifact art = entry.getValue();
 
             File resolvedFile = null;
             boolean preferAar = "aar".equalsIgnoreCase(art.getExtension()) || art.getGroupId().startsWith("androidx.");

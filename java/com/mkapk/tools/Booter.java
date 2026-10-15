@@ -20,17 +20,10 @@ import java.io.File;
 
 public class Booter {
 
-    /**
-     * Initializes the RepositorySystem using Resolver 2.x Supplier mechanism.
-     */
     public static RepositorySystem newRepositorySystem() {
         return new RepositorySystemSupplier().get();
     }
 
-    /**
-     * Retains compile, runtime, and optional dependencies,
-     * discarding only test, provided, and system scopes.
-     */
     private static class PermissiveDependencySelector implements DependencySelector {
         @Override
         public boolean selectDependency(Dependency dependency) {
@@ -47,10 +40,6 @@ public class Booter {
         }
     }
 
-    /**
-     * Forces Aether to traverse into child POMs for every dependency,
-     * preventing optional and transitive runtime components from being pruned.
-     */
     private static class AllDependencyTraverser implements DependencyTraverser {
         @Override
         public boolean traverseDependency(Dependency dependency) {
@@ -63,27 +52,19 @@ public class Booter {
         }
     }
 
-    /**
-     * Configures a repository session mapped to local storage, preserving built-in
-     * POM handlers, registering AAR/JAR packaging, enforcing full graph traversal,
-     * and silencing listeners to protect stdout IPC streams.
-     */
     public static RepositorySystemSession newRepositorySystemSession(RepositorySystem system, File localRepoDir) {
         if (system == null) {
-            throw new IllegalStateException("RepositorySystem initialization failed. Verify dependencies in daemon classpath.");
+            throw new IllegalStateException("RepositorySystem initialization failed.");
         }
 
         DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
-
         LocalRepository localRepo = new LocalRepository(localRepoDir);
         session.setLocalRepositoryManager(system.newLocalRepositoryManager(session, localRepo));
 
-        // 1. Full transitive graph traversal rules
         session.setDependencySelector(new PermissiveDependencySelector());
         session.setDependencyTraverser(new AllDependencyTraverser());
         session.setConfigProperty("aether.dependencyCollector.useSkip", false);
 
-        // 2. Preserve default Maven stereotypes (e.g., 'pom') and append 'aar' and 'jar'
         ArtifactTypeRegistry existingRegistry = session.getArtifactTypeRegistry();
         DefaultArtifactTypeRegistry stereotypes = (existingRegistry instanceof DefaultArtifactTypeRegistry)
                 ? (DefaultArtifactTypeRegistry) existingRegistry
@@ -93,10 +74,7 @@ public class Booter {
         stereotypes.add(new DefaultArtifactType("jar", "jar", "", "java", false, false));
         session.setArtifactTypeRegistry(stereotypes);
 
-        // 3. Tolerant checksum validation
         session.setChecksumPolicy(RepositoryPolicy.CHECKSUM_POLICY_WARN);
-
-        // 4. Mute console listeners to prevent stdout stream pollution over C++ IPC
         session.setTransferListener(null);
         session.setRepositoryListener(null);
 
