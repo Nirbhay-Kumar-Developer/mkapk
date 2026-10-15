@@ -2,3 +2,4 @@ build/
 test/
 compile_commands.json
 .cache
+dependencies/
