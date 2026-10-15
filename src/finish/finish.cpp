@@ -175,8 +175,16 @@ Result<void> inject_assets_and_dex(
     }
 
     std::map<std::string, fs::path> injection_map;
-    if (fs::exists(dex_file)) injection_map["classes.dex"] = dex_file;
-    
+    if (fs::exists(bin_dir)) {
+        for (const auto& entry : fs::directory_iterator(bin_dir)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".dex") {
+                std::string fname = entry.path().filename().string();
+                if (fname.rfind("classes", 0) == 0) {
+                    injection_map[fname] = entry.path();
+                }
+            }
+        }
+    }
     // Map architecture triplets (e.g. "aarch64-linux-android") or raw ABIs (e.g. "arm64-v8a")
     std::vector<std::string> target_abis;
     for (const auto& entry : allowed_abis) {

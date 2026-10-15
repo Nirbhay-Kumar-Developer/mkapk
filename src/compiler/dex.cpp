@@ -52,16 +52,59 @@ Result<void> run_incremental_dex(
 {
     if (files_to_dex.empty()) return Result<void>::success();
 
+    fs::path abs_src_path = fs::absolute(src_path);
+    fs::path abs_java_out = fs::absolute(java_out);
+    fs::path abs_gen_path = fs::absolute(abs_java_out.parent_path().parent_path() / "gen");
+
+    std::vector<std::string> batched_gen_classes;
+    std::set<std::string> seen_gen_families;
+    std::set<std::string> seen_app_families;
+
     for (const auto& src_file : files_to_dex) {
-        fs::path rel_path = fs::relative(src_file, src_path);
-        fs::path class_dir = java_out / rel_path.parent_path();
+        fs::path abs_file = fs::absolute(src_file);
+        std::string abs_str = abs_file.string();
+
+        bool is_gen = (abs_str.rfind(abs_gen_path.string(), 0) == 0);
+        bool is_class_out = (abs_str.rfind(abs_java_out.string(), 0) == 0);
+
+        fs::path rel_path;
+        if (is_gen) {
+            rel_path = fs::relative(abs_file, abs_gen_path);
+        } else if (is_class_out) {
+            rel_path = fs::relative(abs_file, abs_java_out);
+        } else {
+            rel_path = fs::relative(abs_file, abs_src_path);
+        }
+
+        fs::path class_dir = abs_java_out / rel_path.parent_path();
         std::string base_name = rel_path.stem().string();
+        size_t dollar_pos = base_name.find('$');
+        if (dollar_pos != std::string::npos) {
+            base_name = base_name.substr(0, dollar_pos);
+        }
+
+        std::string family_key = (rel_path.parent_path() / base_name).string();
+
+        // Collect generated R.java / Manifest.java classes for a single batched D8 pass
+        if (is_gen) {
+            if (!seen_gen_families.insert(family_key).second) continue;
+            if (fs::exists(class_dir)) {
+                for (const auto& entry : fs::directory_iterator(class_dir)) {
+                    std::string filename = entry.path().filename().string();
+                    if (filename == base_name + ".class" || filename.rfind(base_name + "$", 0) == 0) {
+                        batched_gen_classes.push_back(fs::absolute(entry.path()).string());
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (!seen_app_families.insert(family_key).second) continue;
 
         std::vector<std::string> family_classes;
         if (fs::exists(class_dir)) {
             for (const auto& entry : fs::directory_iterator(class_dir)) {
                 std::string filename = entry.path().filename().string();
-                // Match the main class and all associated inner/companion classes
                 if (filename == base_name + ".class" || filename.rfind(base_name + "$", 0) == 0) {
                     family_classes.push_back(fs::absolute(entry.path()).string());
                 }
@@ -72,19 +115,15 @@ Result<void> run_incremental_dex(
             fs::path target_dex_dir = dex_cache / rel_path.parent_path();
             fs::create_directories(target_dex_dir);
 
-            // 1. Clean up any existing DEX slices for this class family to prevent stale remnants
-            if (fs::exists(target_dex_dir)) {
-                for (const auto& entry : fs::directory_iterator(target_dex_dir)) {
-                    if (entry.is_regular_file() && entry.path().extension() == ".dex") {
-                        std::string stem = entry.path().stem().string();
-                        if (stem == base_name || stem.rfind(base_name + "_", 0) == 0) {
-                            fs::remove(entry.path());
-                        }
+            for (const auto& entry : fs::directory_iterator(target_dex_dir)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".dex") {
+                    std::string stem = entry.path().stem().string();
+                    if (stem == base_name || stem.rfind(base_name + "_", 0) == 0) {
+                        fs::remove(entry.path());
                     }
                 }
             }
 
-            // 2. Isolate D8 output into a temporary folder to capture all emitted slices cleanly
             fs::path temp_dex_dir = target_dex_dir / ("_tmp_" + base_name);
             if (fs::exists(temp_dex_dir)) fs::remove_all(temp_dex_dir);
             fs::create_directories(temp_dex_dir);
@@ -93,11 +132,10 @@ Result<void> run_incremental_dex(
                 D8, 
                 "--min-api", "21",
                 "--lib", fs::absolute(android_jar).string(),
-                "--classpath", fs::absolute(java_out).string(),
+                "--classpath", abs_java_out.string(),
                 "--output", fs::absolute(temp_dex_dir).string()
             };
 
-            // Inject extra dependency archives for interface desugaring resolution
             for (const auto& jar : extra_jvm_classpaths) {
                 d8_args.push_back("--classpath");
                 d8_args.push_back(fs::absolute(jar).string());
@@ -113,7 +151,6 @@ Result<void> run_incremental_dex(
                 return res;
             }
 
-            // 3. Move and deterministically rename every generated classes*.dex file
             if (fs::exists(temp_dex_dir)) {
                 for (const auto& entry : fs::directory_iterator(temp_dex_dir)) {
                     if (entry.is_regular_file() && entry.path().extension() == ".dex") {
@@ -123,7 +160,6 @@ Result<void> run_incremental_dex(
                         if (filename == "classes.dex") {
                             dest_file = target_dex_dir / (base_name + ".dex");
                         } else if (filename.rfind("classes", 0) == 0) {
-                            // Extract slice suffix (e.g., "classes2.dex" -> "2")
                             std::string suffix = filename.substr(7, filename.size() - 7 - 4);
                             dest_file = target_dex_dir / (base_name + "_" + suffix + ".dex");
                         } else {
@@ -137,6 +173,48 @@ Result<void> run_incremental_dex(
             }
         }
     }
+
+    // Batch-compile all generated R.class and R$*.class files in a single D8 call
+    if (!batched_gen_classes.empty()) {
+        fs::path temp_gen_dir = dex_cache / "_tmp_gen_r";
+        if (fs::exists(temp_gen_dir)) fs::remove_all(temp_gen_dir);
+        fs::create_directories(temp_gen_dir);
+
+        fs::path gen_list_file = dex_cache / "d8_gen_input.txt";
+        std::ofstream gen_out(gen_list_file);
+        for (const auto& cls : batched_gen_classes) {
+            gen_out << cls << "\n";
+        }
+        gen_out.close();
+
+        std::vector<std::string> d8_gen_args = {
+            D8,
+            "--min-api", "21",
+            "--lib", fs::absolute(android_jar).string(),
+            "--output", fs::absolute(temp_gen_dir).string(),
+            "@" + fs::absolute(gen_list_file).string()
+        };
+
+        auto res = run(d8_gen_args, "Batch D8 compilation failed for generated R classes");
+        fs::remove(gen_list_file);
+        if (res.is_err()) {
+            fs::remove_all(temp_gen_dir);
+            return res;
+        }
+
+        int gen_idx = 1;
+        for (const auto& entry : fs::directory_iterator(temp_gen_dir)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".dex") {
+                fs::path target_name = (gen_idx == 1)
+                    ? (dex_cache / "gen_r_classes.dex")
+                    : (dex_cache / ("gen_r_classes" + std::to_string(gen_idx) + ".dex"));
+                fs::rename(entry.path(), target_name);
+                gen_idx++;
+            }
+        }
+        fs::remove_all(temp_gen_dir);
+    }
+
     return Result<void>::success();
 }
 
