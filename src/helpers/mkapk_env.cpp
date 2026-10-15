@@ -176,69 +176,84 @@ namespace MkapkEnv {
         return tools;
     }
 
-    std::string get_jni_classpath(const MkapkConfig& config) {
-        if (config.sdk_root.empty()) {
-            UI::warn("SDK_ROOT variable context not explicit in project layout configuration file.");
-        }
-        
-        fs::path sdk_root = resolve_path(config.sdk_root);
-        fs::path cmdline_lib = sdk_root / "cmdline-tools/latest/lib";
-        fs::path prefix_java = fs::path(TERMUX_SHARE) / "java";
-
+            std::string get_jni_classpath(const MkapkConfig& config) {
         std::vector<std::string> cp_entries;
+        std::set<std::string> seen_paths;
 
-        // 1. CORE MKAPK & COMPILER UTILITIES
-        fs::path coord_jar = fs::path(TERMUX_SHARE) / "mkapk/mkapk-coordinator.jar";
-        fs::path apksigner_jar = prefix_java / "apksigner.jar";
-        fs::path r8_jar = cmdline_lib / "r8.jar";
-        fs::path d8_jar = cmdline_lib / "d8-classpath.jar";
-        fs::path resguard_jar = resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
-        fs::path kotlin_preloader = "/data/data/com.termux/files/usr/opt/kotlin/lib/kotlin-preloader.jar";
+        auto add_cp = [&](const fs::path& p) {
+            if (fs::exists(p)) {
+                std::string abs_path = fs::absolute(p).string();
+                if (seen_paths.insert(abs_path).second) {
+                    cp_entries.push_back(abs_path);
+                }
+            }
+        };
 
-        if (fs::exists(coord_jar)) cp_entries.push_back(coord_jar.string());
-        else UI::error("Missing tool dependency footprint registry path", coord_jar.string());
+        const char* prefix_env = std::getenv("PREFIX");
+        fs::path prefix_path = prefix_env ? fs::path(prefix_env) : fs::path("/data/data/com.termux/files/usr");
+        fs::path termux_share = prefix_path / "share";
 
-        if (fs::exists(r8_jar)) cp_entries.push_back(r8_jar.string());
-        else UI::error("Missing tool dependency footprint registry path", r8_jar.string());
-        
-        if (fs::exists(apksigner_jar)) cp_entries.push_back(apksigner_jar.string());
-        else UI::error("Missing tool dependency footprint registry path", apksigner_jar.string());
-
-        if (fs::exists(d8_jar)) cp_entries.push_back(d8_jar.string());
-        if (fs::exists(resguard_jar)) cp_entries.push_back(resguard_jar.string());
-        if (fs::exists(kotlin_preloader)) cp_entries.push_back(kotlin_preloader.string());
-
-        // 2. DYNAMIC ANDROID SDK COMPONENT INJECTIONS (Manifest Merger, etc.)
-        if (fs::exists(cmdline_lib)) {
-            for (const auto& entry : fs::recursive_directory_iterator(cmdline_lib)) {
+        // 1. MKAPK COORDINATOR & PRIVATE MAVEN DEPENDENCIES ($PREFIX/share/mkapk/)
+        fs::path mkapk_dir = termux_share / "mkapk";
+        if (fs::exists(mkapk_dir)) {
+            for (const auto& entry : fs::recursive_directory_iterator(mkapk_dir)) {
                 if (entry.is_regular_file() && entry.path().extension() == ".jar") {
-                    std::string filename = entry.path().filename().string();
-                    if (filename.find("kotlin") == std::string::npos) {
-                        cp_entries.push_back(entry.path().string());
+                    add_cp(entry.path());
+                }
+            }
+        } else {
+            UI::error("Missing mkapk share directory footprint: " + mkapk_dir.string());
+        }
+
+        // 2. SYSTEM JAVA SHARE TOOLS ($PREFIX/share/java/ e.g., apksigner.jar)
+        fs::path java_share = termux_share / "java";
+        if (fs::exists(java_share)) {
+            for (const auto& entry : fs::directory_iterator(java_share)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".jar") {
+                    add_cp(entry.path());
+                }
+            }
+        }
+
+        // 3. KOTLIN PRELOADER ONLY (Avoid loading kotlin-main-kts.jar which has legacy SLF4J 1.7 bindings)
+        fs::path kotlin_preloader = prefix_path / "opt/kotlin/lib/kotlin-preloader.jar";
+        if (fs::exists(kotlin_preloader)) {
+            add_cp(kotlin_preloader);
+        }
+
+        // 4. ANDROID SDK CMDLINE-TOOLS (R8, D8, ManifestMerger & its nested runtime dependencies)
+        if (!config.sdk_root.empty()) {
+            fs::path sdk_root = resolve_path(config.sdk_root);
+            fs::path cmdline_lib = sdk_root / "cmdline-tools/latest/lib";
+
+            if (fs::exists(cmdline_lib)) {
+                for (const auto& entry : fs::recursive_directory_iterator(cmdline_lib)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".jar") {
+                        std::string fname = entry.path().filename().string();
+                        if (fname.find("kotlin") == std::string::npos) {
+                            add_cp(entry.path());
+                        }
                     }
                 }
+            } else {
+                UI::warn("Android SDK cmdline-tools missing at: " + cmdline_lib.string());
             }
         } else {
-            UI::warn("Android SDK cmdline-tools missing at: " + cmdline_lib.string());
+            UI::warn("SDK_ROOT variable context not explicit in project layout configuration file.");
         }
 
-        // 3. SYSTEM JAVA LIBRARIES (Maven resolver dependencies)
-        if (fs::exists(prefix_java)) {
-            for (const auto& entry : fs::directory_iterator(prefix_java)) {
-                if (entry.is_regular_file() && entry.path().extension() == ".jar") {
-                    cp_entries.push_back(entry.path().string());
-                }
-            }
-        } else {
-            UI::warn("System Java share directory missing at: " + prefix_java.string());
+        // 5. ANDRESGUARD CLI (If installed in user workspace)
+        fs::path resguard_jar = resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
+        if (fs::exists(resguard_jar)) {
+            add_cp(resguard_jar);
         }
 
-        // 4. CLASSPATH FORMAT ASSEMBLER LOOP
+        // 6. ASSEMBLE DELIMITED CLASSPATH STRING
         std::string full_cp = "";
         for (size_t i = 0; i < cp_entries.size(); ++i) {
             full_cp += cp_entries[i] + (i == cp_entries.size() - 1 ? "" : ":");
         }
-        
+
         return full_cp;
     }
 
