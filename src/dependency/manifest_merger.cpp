@@ -19,7 +19,7 @@ static std::string resolve_cached_manifest_path(const fs::path& aar_path) {
     // AAR Path structure: .../mkapk/lib/<groupId>.<artifactId>/<version>/<artifactId>-<version>.aar
     try {
         auto parent_dir = aar_path.parent_path();
-        fs::path manifest_path = parent_dir / "AndroidManifest.xml";
+        fs::path manifest_path = parent_dir / "extracted_aar" / "AndroidManifest.xml";
         if (fs::exists(manifest_path)) {
             return fs::absolute(manifest_path).string();
         }
@@ -34,12 +34,12 @@ bool merge_manifests(
     const std::string& output_manifest,
     const std::vector<std::string>& resolved_paths,
     const std::string& min_sdk,
-    const std::string& target_sdk) 
+    const std::string& target_sdk)
 {
     UI::stage("Manifest Merger", "Merging library manifests with the primary AndroidManifest.xml");
 
     std::vector<std::string> target_manifests;
-    
+
     fs::path primary_path(main_manifest);
     if (!fs::exists(primary_path)) {
         UI::error("Primary AndroidManifest.xml not found", main_manifest);
@@ -49,7 +49,7 @@ bool merge_manifests(
 
     fs::path final_output_path(output_manifest);
     fs::create_directories(final_output_path.parent_path());
-    
+
     fs::path temp_output_path = fs::temp_directory_path() / "merged_AndroidManifest.xml";
     if (fs::exists(temp_output_path)) fs::remove(temp_output_path);
 
@@ -61,7 +61,7 @@ bool merge_manifests(
             std::string cached_manifest = resolve_cached_manifest_path(file_path);
             if (!cached_manifest.empty()) {
                 target_manifests.push_back(cached_manifest);
-                UI::info("[+] Enqueued for merging: " + fs::path(cached_manifest).parent_path().parent_path().filename().string());
+                UI::info("[+] Enqueued for merging: " + fs::path(cached_manifest).parent_path().parent_path().parent_path().filename().string());
             }
         }
     }
@@ -80,7 +80,7 @@ bool merge_manifests(
     try {
         IpcClient::call_java_tool(daemon_args);
     } catch (const std::exception& e) {
-        UI::error("Manifest merging execution failed during daemon processing", e.what());
+        UI::error("Manifest merging failed", e.what());
         return false;
     }
 
@@ -88,11 +88,11 @@ bool merge_manifests(
         std::error_code ec;
         fs::copy_file(temp_output_path, final_output_path, fs::copy_options::overwrite_existing, ec);
         fs::remove(temp_output_path, ec);
-        
-        UI::success("Manifest integration complete: " + final_output_path.filename().string());
+
+        UI::info("Manifest merging completed.";
         return true;
     } else {
-        UI::error("Merged manifest output verification failed. File not found or empty at: " + output_manifest);
+        UI::error("Merged manifest not found at: " + output_manifest);
         return false;
     }
 }
