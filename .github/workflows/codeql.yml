@@ -3,9 +3,9 @@ name: "CodeQL Advanced & Linting Pipeline"
 
 "on":
   push:
-    branches: ["Dependency-Resolver"]
+    branches: ["main"]
   pull_request:
-    branches: ["Dependency-Resolver"]
+    branches: ["main"]
   schedule:
     - cron: '18 21 * * 2'
 
