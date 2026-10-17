@@ -4,8 +4,10 @@
 #include <filesystem>
 #include <fstream>
 #include <system_error>
+#include <future>
 
 #include "mkapk_extractor.hpp"
+#include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
 
 namespace fs = std::filesystem;
@@ -42,13 +44,31 @@ bool extract_aar(const std::string& aar_path) {
         return false;
     }
 
-    fs::path dest_dir = aar.parent_path();
+    fs::path dep_dir = aar.parent_path();
+    fs::path dest_dir = dep_dir / "extracted_aar";
+    fs::path hash_file = dep_dir / "extracted_aar.hash";
     std::string lib_identifier = aar.stem().string();
-    fs::path marker_file = dest_dir / ".extracted";
 
-    // Fast check: If already cleanly extracted and classes.jar exists, skip
-    if (fs::exists(marker_file) && fs::exists(dest_dir / "classes.jar")) {
-        return true;
+    // 1. Cache Validation: check hash and AndroidManifest.xml (classes.jar is optional in AARs)
+    if (fs::exists(dest_dir) && fs::exists(hash_file)) {
+        std::ifstream hf(hash_file);
+        std::string expected_hash;
+        hf >> expected_hash;
+        hf.close();
+
+        std::string actual_hash = get_dir_hash(dest_dir);
+        if (!expected_hash.empty() && expected_hash == actual_hash && fs::exists(dest_dir / "AndroidManifest.xml")) {
+            return true;
+        }
+    }
+
+    // 2. Re-extraction on Mismatch or Missing Cache
+    std::error_code ec;
+    if (fs::exists(dest_dir)) {
+        fs::remove_all(dest_dir, ec);
+    }
+    if (fs::exists(hash_file)) {
+        fs::remove(hash_file, ec);
     }
 
     UI::stage("Extracting AAR", lib_identifier);
@@ -69,90 +89,77 @@ bool extract_aar(const std::string& aar_path) {
 
         std::string entry_name(name);
 
-        // Ignore directory entries themselves
         if (!entry_name.empty() && entry_name.back() == '/') {
             continue;
         }
 
-        // 1. Android Manifest
-        if (entry_name == "AndroidManifest.xml") {
-            if (!extract_zip_entry(archive, i, dest_dir / "AndroidManifest.xml")) {
-                extraction_failed = true;
-            }
-        } 
-        // 2. Main bytecode archive
-        else if (entry_name == "classes.jar") {
-            if (!extract_zip_entry(archive, i, dest_dir / "classes.jar")) {
-                extraction_failed = true;
-            }
-        } 
-        // 3. ProGuard / R8 consumer keep rules
-        else if (entry_name == "proguard.txt") {
-            if (!extract_zip_entry(archive, i, dest_dir / "proguard.txt")) {
-                extraction_failed = true;
-            }
-        }
-        // 4. Resource symbol definitions
-        else if (entry_name == "R.txt") {
-            if (!extract_zip_entry(archive, i, dest_dir / "R.txt")) {
-                extraction_failed = true;
-            }
-        }
-        // 5. Android resources (res/*)
-        else if (entry_name.rfind("res/", 0) == 0) {
+        if (entry_name == "AndroidManifest.xml" ||
+            entry_name == "classes.jar" ||
+            entry_name == "proguard.txt" ||
+            entry_name == "R.txt" ||
+            entry_name.rfind("res/", 0) == 0 ||
+            entry_name.rfind("jni/", 0) == 0 ||
+            entry_name.rfind("libs/", 0) == 0 ||
+            entry_name.rfind("assets/", 0) == 0) {
+
             fs::path target_path = dest_dir / entry_name;
             if (!extract_zip_entry(archive, i, target_path)) {
                 extraction_failed = true;
-            }
-        }
-        // 6. Native prebuilt shared libraries (jni/*)
-        else if (entry_name.rfind("jni/", 0) == 0) {
-            fs::path target_path = dest_dir / entry_name;
-            if (!extract_zip_entry(archive, i, target_path)) {
-                extraction_failed = true;
-            }
-        }
-        // 7. Embedded secondary JARs (libs/*)
-        else if (entry_name.rfind("libs/", 0) == 0) {
-            fs::path target_path = dest_dir / entry_name;
-            if (!extract_zip_entry(archive, i, target_path)) {
-                extraction_failed = true;
-            }
-        }
-        // 8. Custom assets (assets/*)
-        else if (entry_name.rfind("assets/", 0) == 0) {
-            fs::path target_path = dest_dir / entry_name;
-            if (!extract_zip_entry(archive, i, target_path)) {
-                extraction_failed = true;
+                break;
             }
         }
     }
 
     zip_close(archive);
 
-    if (extraction_failed) {
-        UI::error("Partial failure occurred during AAR extraction for " + lib_identifier);
-        fs::remove(marker_file);
+    // Fail only if zip extraction errored or AndroidManifest.xml is missing
+    if (extraction_failed || !fs::exists(dest_dir / "AndroidManifest.xml")) {
+        UI::error("Failure in AAR extraction for " + lib_identifier);
+        fs::remove_all(dest_dir, ec);
+        fs::remove(hash_file, ec);
         return false;
     }
 
-    // Touch completion marker
-    std::ofstream marker(marker_file);
-    marker << "1\n";
-    marker.close();
+    // 3. Compute Hash of Extracted Directory and Write Marker
+    std::string computed_hash = get_dir_hash(dest_dir);
+    if (computed_hash.empty()) {
+        UI::error("Failed to compute directory hash for " + lib_identifier);
+        fs::remove_all(dest_dir, ec);
+        fs::remove(hash_file, ec);
+        return false;
+    }
+
+    std::ofstream out_hash(hash_file);
+    if (!out_hash.is_open()) {
+        UI::error("Failed to persist hash for " + lib_identifier);
+        return false;
+    }
+    out_hash << computed_hash << "\n";
+    out_hash.close();
 
     return true;
 }
 
-void extract_all(const std::vector<std::string>& resolved_paths) {
+bool extract_all(const std::vector<std::string>& resolved_paths) {
+    std::vector<std::future<bool>> tasks;
     for (const auto& path_str : resolved_paths) {
         fs::path p(path_str);
         if (p.extension() == ".aar") {
-            extract_aar(p.string());
+            tasks.push_back(std::async(std::launch::async, [path_str]() {
+                return extract_aar(path_str);
+            }));
         }
     }
+
+    bool all_success = true;
+    for (auto& task : tasks) {
+        if (!task.get()) {
+            all_success = false;
+        }
+    }
+    return all_success;
 }
-    
+
 void save_project_dependencies(const fs::path& build_dir, const std::vector<std::string>& artifacts) {
     fs::path deps_file = build_dir / "dependencies.txt";
     std::ofstream out(deps_file);
@@ -182,15 +189,15 @@ DependencyArtifacts load_project_dependencies(const fs::path& build_dir) {
         if (p.extension() == ".jar") {
             result.jvm_classpath_jars.push_back(p);
         } else if (p.extension() == ".aar") {
-            fs::path aar_dir = p.parent_path();
+            fs::path aar_dir = p.parent_path() / "extracted_aar";
 
-            // 1. Core bytecode jar
+            // 1. Core bytecode JAR
             fs::path classes_jar = aar_dir / "classes.jar";
             if (fs::exists(classes_jar)) {
                 result.jvm_classpath_jars.push_back(classes_jar);
             }
 
-            // 2. Secondary embedded jars (e.g. emoji2's libs/repackaged.jar)
+            // 2. Secondary embedded JARs (e.g., libs/repackaged.jar)
             fs::path inner_libs = aar_dir / "libs";
             if (fs::exists(inner_libs) && fs::is_directory(inner_libs)) {
                 for (const auto& entry : fs::directory_iterator(inner_libs)) {

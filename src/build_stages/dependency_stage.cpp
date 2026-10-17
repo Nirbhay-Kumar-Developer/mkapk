@@ -20,6 +20,8 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
     ctx.active_manifest_path = ctx.manifest_path;
 
     if (config.dependencies.empty()) {
+        fs::remove(ctx.build_dir / "dependencies.txt");
+        fs::remove(ctx.build_dir / ".hashes" / "deps.hash");
         return Result<void>::success();
     }
 
@@ -68,7 +70,7 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
 
     // 3. Resolve dependencies if configuration changed or cached artifacts are missing on disk
     if (deps_config_changed || cached_artifacts.empty() || missing_cached_files) {
-        UI::stage("Resolver", "Resolving dependencies via Maven matrix...");
+        UI::stage("Resolver", "Resolving project dependencies...");
         ctx.all_resolved_artifacts = MkapkResolver::resolve_dependencies(config.dependencies, config);
 
         if (ctx.all_resolved_artifacts.empty()) {
@@ -80,18 +82,27 @@ Result<void> DependencyStage::execute(const MkapkConfig& config, PipelineContext
         auto last = std::unique(ctx.all_resolved_artifacts.begin(), ctx.all_resolved_artifacts.end());
         ctx.all_resolved_artifacts.erase(last, ctx.all_resolved_artifacts.end());
 
-        // Unpack archives (AARs)
-        MkapkExtractor::extract_all(ctx.all_resolved_artifacts);
+        // Unpack archives (AARs) and validate cache hashes; fail fast if any archive is corrupted
+        if (!MkapkExtractor::extract_all(ctx.all_resolved_artifacts)) {
+            return Result<void>::error("Failed to unpack or validate one or more AAR dependencies.");
+        }
 
         // Save resolved list to the project build cache
         MkapkExtractor::save_project_dependencies(ctx.build_dir, ctx.all_resolved_artifacts);
 
+        // Write configuration hash to persist state only after successful resolution and extraction
+        std::ofstream hf(dep_hash_file);
+        if (hf.is_open()) {
+            hf << current_deps_hash << "\n";
+            hf.close();
+        }
     } else {
-        UI::info("Dependencies configuration up-to-date. Using cached resolution graph.");
         ctx.all_resolved_artifacts = cached_artifacts;
 
-        // Ensure all cached AARs have their classes.jar and res/ unpacked
-        MkapkExtractor::extract_all(ctx.all_resolved_artifacts);
+        // Ensure all cached AARs have their classes.jar and res/ unpacked and verified
+        if (!MkapkExtractor::extract_all(ctx.all_resolved_artifacts)) {
+            return Result<void>::error("Failed to unpack or validate one or more cached AAR dependencies.");
+        }
     }
 
     // 4. Merge AndroidManifest.xml

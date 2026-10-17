@@ -7,9 +7,9 @@
 
 namespace MkapkResolver {
     /**
-     * Spawns a dedicated connection loop to the Java Daemon, requests 
+     * Spawns a dedicated connection loop to the Java Daemon, requests
      * recursive dependency graph resolution, and translates absolute file paths.
-     * 
+     *
      * @param coordinates The target Maven strings matrix
      * @param config The structural configuration reference container.
      * @return A vector list containing paths to cached on-device .aar and .jar artifacts.
