@@ -90,21 +90,26 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         enqueue_all_sources();
     }
 
-    // 1. Dependency Resolution & Cache Writing (Runs first)
-    DependencyStage dep_stage;
-    Result<void> res_dep = dep_stage.execute(config, ctx);
-    if (res_dep.is_err()) {
-        throw std::runtime_error("Dependency resolution failure: " + res_dep.get_error());
-    }
+    // STEP 1: PARALLEL EXECUTION OF NATIVE STAGE & DEPENDENCY STAGE
 
-    // 2. Launch ResourceStage and NativeStage concurrently
-    ResourceStage res_stage;
+    // Launch Native Compilation (Clang/NDK) immediately in the background
     NativeStage native_stage;
-
     auto native_future = std::async(std::launch::async, [&]() -> Result<void> {
         return native_stage.execute(config, ctx);
     });
 
+    // Run Dependency Stage (Aether Resolver, AAR Extraction, Manifest Merger)
+    DependencyStage dep_stage;
+    Result<void> res_dep = dep_stage.execute(config, ctx);
+    if (res_dep.is_err()) {
+        if (native_future.valid()) native_future.wait();
+        throw std::runtime_error("Dependency resolution failure: " + res_dep.get_error());
+    }
+
+    // STEP 2: RESOURCE STAGE (Runs concurrently with remaining Native tasks)
+
+    // Launch ResourceStage now that library AARs and manifests are resolved and extracted
+    ResourceStage res_stage;
     auto resource_future = std::async(std::launch::async, [&]() -> Result<void> {
         return res_stage.execute(config, ctx);
     });
@@ -116,7 +121,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         throw std::runtime_error("Resource pipeline failure: " + res_resource.get_error());
     }
 
-    // 3. Detect AAPT2 R.txt ID changes and trigger JVM recompilation if necessary
+    // STEP 3: SYMBOL SHIFT DETECTION & JVM RECOMPILATION DIRECTIVE
     fs::path r_txt_path = ctx.build_dir / "R.txt";
     std::string post_link_r_hash = fs::exists(r_txt_path) ? get_file_hash(r_txt_path) : "";
     std::string old_r_hash = ctx.new_state["meta|r_txt"];
@@ -131,13 +136,13 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         enqueue_all_sources();
     }
 
-    // 4. Launch JvmStage concurrently alongside running NativeStage
+    // STEP 4: JVM STAGE (Runs concurrently with finishing Native Stage)
     JvmStage jvm_stage;
     auto jvm_future = std::async(std::launch::async, [&]() -> Result<void> {
         return jvm_stage.execute(config, ctx);
     });
 
-    // 5. Await both NativeStage and JvmStage completion
+    // Await both NativeStage and JvmStage completion
     Result<void> res_native = native_future.get();
     if (res_native.is_err()) {
         if (jvm_future.valid()) jvm_future.wait();
@@ -149,7 +154,7 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
         throw std::runtime_error("JVM pipeline failure: " + res_jvm.get_error());
     }
 
-    // 6. Packaging, Zipalign, and Apksigner (Runs after all stages finish)
+    // STEP 5: PACKAGING, ZIPALIGN, AND APKSIGNER
     PackageStage pkg_stage;
     Result<void> res_pack = pkg_stage.execute(config, ctx);
     if (res_pack.is_err()) {

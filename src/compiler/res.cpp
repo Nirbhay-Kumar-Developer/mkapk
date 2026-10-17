@@ -9,11 +9,15 @@
 #include <algorithm>
 #include <set>
 #include <fstream>
+#include <thread>
+#include <atomic>
+#include <mutex>
 
 #include "mkapk_ui.hpp"
 #include "mkapk_config.hpp"
 #include "mkapk_result.hpp"
 #include "mkapk_tools.hpp"
+#include "mkapk_extractor.hpp"
 
 namespace fs = std::filesystem;
 
@@ -30,18 +34,28 @@ Result<void> compile_resources(
     fs::path flat_dir = bin_dir / "flat_res";
     fs::create_directories(flat_dir);
 
-    // --- PHASE 1: PROCESS CORE APPLICATION RESOURCES ---
+    struct CompileJob {
+        std::string log_msg;
+        std::vector<std::string> args;
+        std::string err_msg;
+    };
+
+    std::vector<CompileJob> jobs;
+
+    // --- PHASE 1: COLLECT CORE APPLICATION RESOURCE JOB ---
     if (fs::exists(res_dir)) {
         if (changed_res_files == nullptr) {
             UI::stage(UI::Msg::STAGE_RES, "Compiling resources");
 
-            std::vector<std::string> args = {
-                AAPT2, "compile",
-                "--dir", fs::absolute(res_dir).string(),
-                "-o", fs::absolute(flat_dir).string()
-            };
-            auto res = run_func(args, "Full resource compilation failed");
-            if (res.is_err()) return res;
+            jobs.push_back({
+                "",
+                {
+                    AAPT2, "compile",
+                    "--dir", fs::absolute(res_dir).string(),
+                    "-o", fs::absolute(flat_dir).string()
+                },
+                "Full resource compilation failed"
+            });
         }
         else if (!changed_res_files->empty()) {
             UI::stage(UI::Msg::STAGE_RES, "Compiling " + std::to_string(changed_res_files->size()) + " resource files");
@@ -55,36 +69,102 @@ Result<void> compile_resources(
                 args.push_back(fs::absolute(f).string());
             }
 
-            auto res = run_func(args, "Batch resource compilation failed");
-            if (res.is_err()) return res;
+            jobs.push_back({
+                "",
+                std::move(args),
+                "Batch resource compilation failed"
+            });
         }
     } else {
         UI::warn("Primary resource directory not located at: " + res_dir.string());
     }
 
-    // --- PHASE 2: PROCESS EXTRA AAR LIBRARY DEPENDENCY RESOURCE TREES ---
+    // --- PHASE 2: COLLECT LIBRARY DEPENDENCY RESOURCE JOBS ---
+    // With extracted_aar/, extra_res is: <group_path>/<artifactId>/<version>/extracted_aar/res
     if (!extra_dependency_res_dirs.empty()) {
         for (const auto& extra_res : extra_dependency_res_dirs) {
             if (fs::exists(extra_res) && !fs::is_empty(extra_res)) {
 
-                std::string lib_name = extra_res.parent_path().parent_path().filename().string();
-                std::string lib_version = extra_res.parent_path().filename().string();
+                std::string lib_name = extra_res.parent_path().parent_path().parent_path().filename().string();
+                std::string lib_version = extra_res.parent_path().parent_path().filename().string();
 
                 fs::path lib_out_arc = flat_dir / (lib_name + "_" + lib_version + ".flata");
 
                 if (!fs::exists(lib_out_arc)) {
-                    std::vector<std::string> extra_args = {
-                        AAPT2, "compile",
-                        "--dir", fs::absolute(extra_res).string(),
-                        "-o", fs::absolute(lib_out_arc).string()
-                    };
-
-                    UI::info("[+] Compiling library resources: " + lib_name);
-                    auto res = run_func(extra_args, "Failed compilation of external dependency resource directory tree: " + extra_res.string());
-                    if (res.is_err()) return res;
+                    jobs.push_back({
+                        "[+] Compiling library resources: " + lib_name,
+                        {
+                            AAPT2, "compile",
+                            "--dir", fs::absolute(extra_res).string(),
+                            "-o", fs::absolute(lib_out_arc).string()
+                        },
+                        "Failed compilation of external dependency resource directory tree: " + extra_res.string()
+                    });
                 }
             }
         }
+    }
+
+    if (jobs.empty()) {
+        return Result<void>::success();
+    }
+
+    // Fast-path: Skip worker pool thread allocation if there is only 1 job
+    if (jobs.size() == 1) {
+        const auto& job = jobs[0];
+        if (!job.log_msg.empty()) {
+            UI::info(job.log_msg);
+        }
+        return run_func(job.args, job.err_msg);
+    }
+
+    // --- PHASE 3: EXECUTE COMPILATION JOBS IN PARALLEL ---
+    unsigned int hardware_threads = std::thread::hardware_concurrency();
+    unsigned int pool_size = std::min<unsigned int>(jobs.size(), std::max(2u, hardware_threads));
+
+    std::atomic<size_t> next_job_idx{0};
+    std::atomic<bool> has_error{false};
+    std::mutex error_mutex;
+    std::string first_error_msg;
+
+    std::vector<std::thread> workers;
+    workers.reserve(pool_size);
+
+    for (unsigned int i = 0; i < pool_size; ++i) {
+        workers.emplace_back([&]() {
+            while (!has_error.load(std::memory_order_relaxed)) {
+                size_t idx = next_job_idx.fetch_add(1, std::memory_order_relaxed);
+                if (idx >= jobs.size()) {
+                    break;
+                }
+
+                const auto& job = jobs[idx];
+                if (!job.log_msg.empty()) {
+                    UI::info(job.log_msg);
+                }
+
+                auto res = run_func(job.args, job.err_msg);
+                if (res.is_err()) {
+                    bool expected = false;
+                    if (has_error.compare_exchange_strong(expected, true)) {
+                        std::lock_guard<std::mutex> lock(error_mutex);
+                        first_error_msg = res.get_error();
+                    }
+                    break;
+                }
+            }
+        });
+    }
+
+    for (auto& w : workers) {
+        if (w.joinable()) {
+            w.join();
+        }
+    }
+
+    if (has_error.load()) {
+        std::lock_guard<std::mutex> lock(error_mutex);
+        return Result<void>::error(first_error_msg);
     }
 
     return Result<void>::success();
@@ -154,16 +234,11 @@ Result<void> link_manifest(
 
     // 2. Discover library packages from dependency manifests
     std::set<std::string> extra_packages;
-    fs::path cache_root = MkapkEnv::get_dependency_cache_dir();
-
-    if (fs::exists(cache_root)) {
-        for (const auto& entry : fs::recursive_directory_iterator(cache_root)) {
-            if (entry.is_regular_file() && entry.path().filename() == "AndroidManifest.xml") {
-                std::string pkg = extract_manifest_package(entry.path());
-                if (!pkg.empty() && pkg != primary_package) {
-                    extra_packages.insert(pkg);
-                }
-            }
+    auto dep_artifacts = MkapkExtractor::load_project_dependencies(bin_dir);
+    for (const auto& manifest_file : dep_artifacts.manifests) {
+        std::string pkg = extract_manifest_package(manifest_file);
+        if (!pkg.empty() && pkg != primary_package) {
+            extra_packages.insert(pkg);
         }
     }
 
@@ -320,7 +395,7 @@ fs::path obfuscate_resources(
     }
 
     // Cache the mapping file for the next build pass
-    fs::path generated_mapping = resguard_out / "resource_mapping.txt";
+    fs::path generated_mapping = resguard_out / ("resource_mapping_" + in_apk.stem().string() + ".txt");
     if (fs::exists(generated_mapping)) {
         fs::copy_file(generated_mapping, prev_mapping, fs::copy_options::overwrite_existing);
     }

@@ -33,7 +33,7 @@ struct PipelineContext {
     std::map<std::string, std::string> new_state;
     bool resources_triggered = false;
     std::vector<std::string> compile_architectures;
-    
+
     std::string final_output_msg;
 };
 

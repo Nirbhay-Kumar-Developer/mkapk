@@ -11,21 +11,9 @@
 #include "mkapk_result.hpp"
 #include "mkapk_tools.hpp"
 
-#define XXH_INLINE_ALL
-#include <xxhash.h>
-
 namespace fs = std::filesystem;
 
-// Generate collision-free names for arbitrarily nested Maven paths
-static std::string get_stable_flata_name(const fs::path& extra_res) {
-    std::string abs_str = fs::absolute(extra_res).string();
-    XXH64_hash_t hash = XXH3_64bits(abs_str.data(), abs_str.size());
-    std::stringstream ss;
-    ss << "res_" << std::setfill('0') << std::setw(16) << std::hex << hash << ".flata";
-    return ss.str();
-}
-
-Result<void> ResourceStage::execute(const MkapkConfig&  /*config*/, PipelineContext& ctx) {
+Result<void> ResourceStage::execute(const MkapkConfig& /*config*/, PipelineContext& ctx) {
     fs::path flat_dir = ctx.build_dir / "flat_res";
     fs::create_directories(flat_dir);
 
@@ -40,11 +28,15 @@ Result<void> ResourceStage::execute(const MkapkConfig&  /*config*/, PipelineCont
     // 2. Gather extracted AAR dependency resource folders from dependencies.txt
     auto dep_artifacts = MkapkExtractor::load_project_dependencies(ctx.build_dir);
     std::vector<fs::path> lib_res_dirs = std::move(dep_artifacts.res_directories);
- 
+
     bool missing_flata = false;
 
+    // With extracted_aar/, extra_res is: <group_path>/<artifactId>/<version>/extracted_aar/res
     for (const auto& extra_res : lib_res_dirs) {
-        fs::path lib_out_arc = flat_dir / get_stable_flata_name(extra_res);
+        std::string lib_name = extra_res.parent_path().parent_path().parent_path().filename().string();
+        std::string lib_version = extra_res.parent_path().parent_path().filename().string();
+        fs::path lib_out_arc = flat_dir / (lib_name + "_" + lib_version + ".flata");
+
         if (!fs::exists(lib_out_arc)) {
             missing_flata = true;
             break;
