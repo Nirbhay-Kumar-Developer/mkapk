@@ -50,14 +50,14 @@ Result<void> start_daemon(const std::string& classpath) {
         close(pipe_from_jvm[0]);
         close(pipe_err_from_jvm[0]);
 
-        execlp("java", "java", 
+        execlp("java", "java",
                "-Djava.security.manager=allow",
-               "-cp", classpath.c_str(), 
-               "com.mkapk.tools.MkapkTools", 
+               "-cp", classpath.c_str(),
+               "com.mkapk.tools.MkapkTools",
                nullptr);
-        
+
         _exit(127);
-    } 
+    }
     else if (daemon_pid > 0) { // Parent Process: mkapk Native
         close(pipe_to_jvm[0]);
         close(pipe_from_jvm[1]);
@@ -101,7 +101,7 @@ Result<void> start_daemon(const std::string& classpath) {
         std::string current_err_line;
         std::string out_accumulator;
         out_accumulator.reserve(4096);
-        
+
         bool handshake_complete = false;
 
         struct pollfd fds[2];
@@ -117,7 +117,7 @@ Result<void> start_daemon(const std::string& classpath) {
             auto now = std::chrono::steady_clock::now();
             int elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
             int remaining_timeout = TIMEOUT_MS - elapsed;
-            
+
             if (remaining_timeout <= 0) {
                 return abort_bootstrap(UI::Msg::DAEMON_FAIL + " JVM bootstrap timed out.");
             }
@@ -133,17 +133,17 @@ Result<void> start_daemon(const std::string& classpath) {
 
             // Read STDOUT for JSON Handshake
             if (fds[0].revents & POLLIN) {
-                char buffer[4096]; 
+                char buffer[4096];
                 ssize_t n = read(fds[0].fd, buffer, sizeof(buffer) - 1);
                 if (n > 0) {
                     buffer[n] = '\0';
                     out_accumulator += buffer;
-                    
+
                     size_t newline_pos;
                     while ((newline_pos = out_accumulator.find('\n')) != std::string::npos) {
                         std::string line = out_accumulator.substr(0, newline_pos);
                         out_accumulator = out_accumulator.substr(newline_pos + 1);
-                        
+
                         try {
                             auto j = nlohmann::json::parse(line);
                             if (j.value("type", "") == "HANDSHAKE_OK") {
@@ -158,7 +158,7 @@ Result<void> start_daemon(const std::string& classpath) {
                     return abort_bootstrap(UI::Msg::DAEMON_FAIL + " JVM terminated unexpectedly.");
                 }
             } else if (fds[0].revents & (POLLERR | POLLHUP)) {
-                return abort_bootstrap(UI::Msg::DAEMON_FAIL + " Daemon stdout pipe disconnected.");
+                return abort_bootstrap(UI::Msg::DAEMON_FAIL);
             }
 
             if (fds[1].revents & POLLIN) {
@@ -183,9 +183,9 @@ Result<void> start_daemon(const std::string& classpath) {
         daemon_logger.flush();
 
     } else {
-        return Result<void>::error("System execution fork failure routing background processes.");
+        return Result<void>::error("Fatal error");
     }
-    
+
     return Result<void>::success();
 }
 
@@ -195,22 +195,21 @@ void stop_daemon() {
         nlohmann::json stop_msg;
         stop_msg["command"] = "STOP_DAEMON";
         std::string stop_cmd = stop_msg.dump() + "\n";
-        
+
         ssize_t total_written = 0;
         while (total_written < static_cast<ssize_t>(stop_cmd.length())) {
             ssize_t bytes_written = write(pipe_to_jvm[1], stop_cmd.c_str() + total_written, stop_cmd.length() - total_written);
             if (bytes_written == -1) {
                 if (errno == EINTR) continue;
-                UI::warn("Failed to transmit tear-down sequence to operational background daemon (Broken Pipe).");
                 break;
             }
             total_written += bytes_written;
         }
-        
+
         close(pipe_to_jvm[1]);
         close(pipe_from_jvm[0]);
         if (pipe_err_from_jvm[0] != -1) close(pipe_err_from_jvm[0]);
-        
+
         int status;
         waitpid(daemon_pid, &status, 0);
         daemon_pid = -1;
@@ -227,13 +226,13 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
     // JSON Refactor: Build and dispatch structured tool execution payload
     nlohmann::json payload;
     payload["command"] = args.empty() ? "" : args[0];
-    
+
     std::vector<std::string> tool_args;
     if (args.size() > 1) {
         tool_args.assign(args.begin() + 1, args.end());
     }
     payload["args"] = tool_args;
-    
+
     std::string msg = payload.dump() + "\n";
 
     ssize_t total_written = 0;
@@ -249,10 +248,10 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
     char buffer[4096];
     std::string out_accumulator;
     out_accumulator.reserve(8192);
-    
+
     std::string err_accumulator;
     err_accumulator.reserve(4096);
-    
+
     bool task_completed = false;
     bool task_failed = false;
 
@@ -265,17 +264,17 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
     while (!task_completed) {
         int ret = poll(fds, 2, -1);
         if (ret < 0) {
-            if (errno == EINTR) continue; 
-            return Result<void>::error("IPC synchronization failure: poll() returned a fatal error.");
+            if (errno == EINTR) continue;
+            return Result<void>::error("IPC synchronization failure");
         }
 
         // CHANNEL 1: STANDARD OUTPUT (JSON Parsing)
         if (fds[0].revents & POLLIN) {
             ssize_t n = read(fds[0].fd, buffer, sizeof(buffer) - 1);
             if (n <= 0) {
-                return Result<void>::error("IPC connection dropped out of scope: Daemon closed stdout channel prematurely.");
+                return Result<void>::error("IPC connection with mkapk java daemon is broken.");
             }
-            
+
             buffer[n] = '\0';
             out_accumulator += buffer;
 
@@ -283,7 +282,7 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
             while ((newline_pos = out_accumulator.find('\n')) != std::string::npos) {
                 std::string line = out_accumulator.substr(0, newline_pos);
                 out_accumulator = out_accumulator.substr(newline_pos + 1);
-                
+
                 if (!line.empty() && line.back() == '\r') {
                     line.pop_back();
                 }
@@ -303,7 +302,7 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
                     } else if (type == "LOG") {
                         std::string level = j.value("level", "INFO");
                         std::string message = j.value("message", "");
-                        
+
                         // Map back to legacy log routing format expected by LogSanitizer
                         if (level == "ERROR") {
                             g_last_daemon_output.push_back("[ERROR]|" + message);
@@ -330,7 +329,7 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
             }
         }
         else if (fds[0].revents & (POLLERR | POLLHUP)) {
-             return Result<void>::error("IPC channel tracking broken link: Daemon stdout pipe disconnected.");
+             return Result<void>::error("IPC connection with mkapk java daemon disconnected.");
         }
 
         // CHANNEL 2: STANDARD ERROR (Passed straight into LogSanitizer for Jansi noise checks)
@@ -339,12 +338,12 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
             if (n > 0) {
                 buffer[n] = '\0';
                 err_accumulator += buffer;
-                
+
                 size_t newline_pos;
                 while ((newline_pos = err_accumulator.find('\n')) != std::string::npos) {
                     std::string line = err_accumulator.substr(0, newline_pos);
                     err_accumulator = err_accumulator.substr(newline_pos + 1);
-                    
+
                     if (!line.empty() && line.back() == '\r') line.pop_back();
                     if (!line.empty()) {
                         daemon_logger.process_stderr_line(line);
@@ -357,13 +356,9 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
     if (!err_accumulator.empty() && err_accumulator.find_first_not_of(" \t\r\n") != std::string::npos) {
         daemon_logger.process_stderr_line(err_accumulator);
     }
-    
+
     daemon_logger.flush();
 
-    if (task_failed) {
-        return Result<void>::error("JVM Daemon reported a fatal execution failure during task: " + args[0]);
-    }
-    
     return Result<void>::success();
 }
 }
