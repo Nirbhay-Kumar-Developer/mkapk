@@ -46,13 +46,13 @@ namespace MkapkEnv {
                 return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
             }
         }
-        
+
         return false;
     }
-    
+
     MkapkConfig load_config(const fs::path& config_path) {
         MkapkConfig config;
-        
+
         // 1. Validate file exists in the targeted directory
         if (!fs::exists(config_path)) {
             return config;
@@ -64,7 +64,7 @@ namespace MkapkEnv {
             UI::error("Failed to open configuration file.", config_path.string());
             return config;
         }
-        
+
         std::string config_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
         // 3. Parse JSON layout safely
@@ -77,14 +77,14 @@ namespace MkapkEnv {
             config.res_dir        = j.value("RES_DIR", "res");
             config.assets_dir     = j.value("ASSETS_DIR", "assets");
             config.manifest       = j.value("MANIFEST", "AndroidManifest.xml");
-            
+
             config.sdk_root       = j.value("SDK_ROOT", "/data/data/com.termux/files/home/android-sdk/Sdk");
             config.target_sdk     = j.value("TARGET_SDK", "36");
             config.min_sdk        = j.value("MIN_SDK","21");
             config.java_version   = j.value("JAVA_VERSION", "17");
             config.compose_plugin = j.value("COMPOSE_PLUGIN", "");
             config.proguard_rules = j.value("PROGUARD_RULES", "proguard-rules.pro");
-            
+
             config.keystore       = j.value("KEYSTORE", "");
             config.keystore_alias = j.value("KEYSTORE_ALIAS", "");
             config.ndk_bin        = j.value("NDK_BIN", "");
@@ -94,7 +94,7 @@ namespace MkapkEnv {
                     if (lib.is_string()) config.system_shared_libs.push_back(lib.get<std::string>());
                 }
             }
-            
+
             if (j.contains("DEPENDENCIES") && j["DEPENDENCIES"].is_array()) {
                 for (const auto& dep : j["DEPENDENCIES"]) {
                     if (dep.is_string()) config.dependencies.push_back(dep.get<std::string>());
@@ -105,7 +105,7 @@ namespace MkapkEnv {
                 for (const auto& item : j["NATIVE_TARGETS"]) {
                     NativeTargetConfig target_cfg;
                     target_cfg.name = item.value("NAME", "");
-                    
+
                     if (item.contains("SOURCES") && item["SOURCES"].is_array()) {
                         for (const auto& src : item["SOURCES"]) {
                             if (src.is_string()) target_cfg.sources.push_back(src.get<std::string>());
@@ -123,7 +123,7 @@ namespace MkapkEnv {
             config.is_valid = true;
 
         } catch (const json::parse_error& e) {
-            UI::error("Fatal parsing failure: Configuration JSON structure is malformed.", e.what());
+            UI::error("Parsing failure: Configuration JSON structure is malformed.", e.what());
             config.is_valid = false;
         }
 
@@ -143,14 +143,59 @@ namespace MkapkEnv {
     }
 
     fs::path get_android_jar(const MkapkConfig& config) {
-        if (!config.sdk_root.empty() && !config.target_sdk.empty()) {
-            fs::path sdk_root = resolve_path(config.sdk_root);
-            fs::path jar_path = sdk_root / "platforms" / ("android-" + config.target_sdk) / "android.jar";
-            if (fs::exists(jar_path)) return fs::absolute(jar_path);
+        if (config.sdk_root.empty() || config.target_sdk.empty()) {
+            UI::error("SDK Configuration Error",
+            "Both 'sdk_root' and 'target_sdk' must be configured in 'config.json'. Set SDK_ROOT to ~/android-sdk/Sdk if you don't handle Android SDK manually.");
+            std::exit(1);
+        }
+        fs::path sdk_root = resolve_path(config.sdk_root);
+        fs::path target_platform_dir = sdk_root / "platforms" / ("android-" + config.target_sdk);
+        fs::path jar_path = target_platform_dir / "android.jar";
+
+        if (fs::exists(jar_path)) {
+            return fs::absolute(jar_path);
         }
 
-        UI::error("Architecture Build Error: android.jar dependencies not found.", 
-                  "Verify that 'SDK_ROOT' and 'TARGET_SDK' are configured correctly inside your config.json.");
+        UI::warn("android.jar not found for API " + config.target_sdk + ". Attempting automatic installation...");
+
+        // Locate sdkmanager binary (check cmdline-tools locations, then fallback to PATH)
+        std::string sdkmanager_bin = "sdkmanager";
+        fs::path candidate_latest = sdk_root / "cmdline-tools" / "latest" / "bin" / "sdkmanager";
+
+        if (fs::exists(candidate_latest)) {
+            sdkmanager_bin = candidate_latest.string();
+        } else {
+        // Search generic cmdline-tools subdirectories if 'latest' is version-tagged (e.g., cmdline-tools/12.0/bin)
+            fs::path cmdline_tools_dir = sdk_root / "cmdline-tools";
+            if (fs::exists(cmdline_tools_dir)) {
+                for (const auto& entry : fs::directory_iterator(cmdline_tools_dir)) {
+                    fs::path possible_bin = entry.path() / "bin" / "sdkmanager";
+                    if (fs::exists(possible_bin)) {
+                        sdkmanager_bin = possible_bin.string();
+                        break;
+                    }
+                }
+            }
+        }
+
+        std::string platform_package = "platforms;android-" + config.target_sdk;
+        UI::stage("SDK Manager", "Installing " + platform_package);
+
+        std::vector<std::string> install_cmd = {
+            sdkmanager_bin,
+            platform_package
+        };
+
+        bool install_ok = run_system_cmd(install_cmd);
+
+        if (install_ok && fs::exists(jar_path)) {
+            UI::success("Successfully installed platform: android-" + config.target_sdk);
+            return fs::absolute(jar_path);
+        }
+
+        UI::error("android.jar dependency could not be resolved.",
+              "Failed to install '" + platform_package + "' via sdkmanager.\n"
+              "Run manually: " + sdkmanager_bin + "\""+ platform_package + "\"");
         std::exit(1);
     }
 
@@ -161,7 +206,7 @@ namespace MkapkEnv {
                 if (fs::exists(ndk_tool)) return ndk_tool.string();
             }
         }
-        
+
         fs::path termux_tool = fs::path(TERMUX_BIN) / name;
         if (fs::exists(termux_tool)) return termux_tool.string();
         return name;
@@ -176,7 +221,7 @@ namespace MkapkEnv {
         return tools;
     }
 
-            std::string get_jni_classpath(const MkapkConfig& config) {
+    std::string get_jni_classpath(const MkapkConfig& config) {
         std::vector<std::string> cp_entries;
         std::set<std::string> seen_paths;
 
@@ -202,7 +247,7 @@ namespace MkapkEnv {
                 }
             }
         } else {
-            UI::error("Missing mkapk share directory footprint: " + mkapk_dir.string());
+            UI::error("Missing mkapk share directory: " + mkapk_dir.string() + " Reinstall mkapk");
         }
 
         // 2. SYSTEM JAVA SHARE TOOLS ($PREFIX/share/java/ e.g., apksigner.jar)
@@ -239,16 +284,10 @@ namespace MkapkEnv {
                 UI::warn("Android SDK cmdline-tools missing at: " + cmdline_lib.string());
             }
         } else {
-            UI::warn("SDK_ROOT variable context not explicit in project layout configuration file.");
+            UI::warn("SDK_ROOT variable not set in project configuration file. Set its value to ~/android-sdk/Sdk for default.");
         }
 
-        // 5. ANDRESGUARD CLI (If installed in user workspace)
-        fs::path resguard_jar = resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
-        if (fs::exists(resguard_jar)) {
-            add_cp(resguard_jar);
-        }
-
-        // 6. ASSEMBLE DELIMITED CLASSPATH STRING
+        // 5. ASSEMBLE DELIMITED CLASSPATH STRING
         std::string full_cp = "";
         for (size_t i = 0; i < cp_entries.size(); ++i) {
             full_cp += cp_entries[i] + (i == cp_entries.size() - 1 ? "" : ":");
@@ -259,10 +298,10 @@ namespace MkapkEnv {
 
     bool init_project() {
         const fs::path TEMPLATE_PATH = fs::path(TERMUX_ETC) / "setup/proj-templates/android";
-        UI::stage("Initialization", "Seeding default template paths structure");
+        UI::stage("Initialization", "Generating default project structure...");
 
         if (!fs::exists(TEMPLATE_PATH)) {
-            UI::error("Target directory mirroring path location not verified structural setup layout base", TEMPLATE_PATH.string());
+            UI::error("mkapk template directory not found: ", TEMPLATE_PATH.string());
             return false;
         }
 
@@ -270,18 +309,17 @@ namespace MkapkEnv {
             for (const auto& entry : fs::directory_iterator(TEMPLATE_PATH)) {
                 const auto& src = entry.path();
                 auto dest = fs::current_path() / src.filename();
-                
+
                 if (fs::is_directory(src)) {
                     fs::copy(src, dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
                 } else {
                     fs::copy_file(src, dest, fs::copy_options::overwrite_existing);
                 }
-                UI::info("Created project template file mirror mapping layer: " + src.filename().string());
             }
-            UI::success("Operational workspace parameters initialized cleanly.");
+            UI::success("mkapk template project initialized successfully.");
             return true;
         } catch (const fs::filesystem_error& e) {
-            UI::error("Filesystem failure encountered during layout environment setup routine execution.", e.what());
+            UI::error("Filesystem error: ", e.what());
             return false;
         }
     }

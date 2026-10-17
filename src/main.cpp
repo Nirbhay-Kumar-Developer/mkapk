@@ -38,7 +38,7 @@ void show_help() {
 
 bool clean_build_directory(bool target_release, bool target_debug) {
     size_t deleted_count = 0;
-    
+
     // If no flags are passed explicitly, clean both by default
     if (!target_release && !target_debug) {
         target_release = true;
@@ -61,7 +61,7 @@ bool clean_build_directory(bool target_release, bool target_debug) {
     };
 
     UI::info("Cleaning build directories...");
-    
+
     if (target_debug) {
         clear_path(fs::absolute("build/debug"));
     }
@@ -79,7 +79,7 @@ int main(int argc, char* argv[]) {
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
     std::streambuf* old_cerr_buf = std::cerr.rdbuf();
-    
+
     std::vector<std::string> args(argv + 1, argv + argc);
 
     if (args.empty() || args[0] == "help" || args[0] == "--help") {
@@ -100,7 +100,7 @@ int main(int argc, char* argv[]) {
         if (command == "clean") {
             bool target_release = std::find(args.begin(), args.end(), "-r") != args.end();
             bool target_debug = std::find(args.begin(), args.end(), "-d") != args.end();
-            
+
             bool success = clean_build_directory(target_release, target_debug);
             std::cerr.rdbuf(old_cerr_buf);
             return success ? 0 : 1;
@@ -143,7 +143,7 @@ int main(int argc, char* argv[]) {
 
             bool is_release = std::find(args.begin(), args.end(), "-release") != args.end();
             bool ndk_all = std::find(args.begin(), args.end(), "-ndk-all") != args.end();
-            
+
             std::string arch_target = "";
             auto arch_it = std::find(args.begin(), args.end(), "-arch");
             if (arch_it != args.end() && (arch_it + 1) != args.end()) {
@@ -159,11 +159,11 @@ int main(int argc, char* argv[]) {
             }
 
             UI::stage(UI::Msg::BUILD_START, build_details);
-            
+
             // PASS CONFIG STRUCT TO HELPERS
             std::string daemon_classpath = MkapkEnv::get_jni_classpath(config);
-            IpcClient::start_daemon(daemon_classpath); 
-            
+            IpcClient::start_daemon(daemon_classpath);
+
             try {
                 // PASS CONFIG STRUCT TO BUILD PIPELINE
                 std::string result = perform_build(args, config);
@@ -175,26 +175,26 @@ int main(int argc, char* argv[]) {
                     UI::success(UI::Msg::BUILD_SUCCESS);
                     UI::info("Artifact Location: " + result);
                 }
-            } 
+            }
             catch (const std::exception& build_err) {
                 IpcClient::stop_daemon();
                 UI::error("Build interrupted.", build_err.what());
                 std::cerr.rdbuf(old_cerr_buf);
-                return 1; 
-            } 
+                return 1;
+            }
             catch (...) {
                 IpcClient::stop_daemon();
                 UI::error(UI::Msg::FATAL_INTERNAL);
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
-        } 
+        }
         else {
             UI::error("Unknown command: '" + command + "'. Use 'mkapk help' to get a list of supported commands.");
             std::cerr.rdbuf(old_cerr_buf);
             return 1;
         }
-    } 
+    }
     catch (const std::exception& e) {
         UI::error("Fatal Error", e.what());
         std::cerr.rdbuf(old_cerr_buf);

@@ -24,7 +24,7 @@ using json = nlohmann::json;
 extern char** environ;
 
 namespace MkapkPluginManager {
-    
+
     const std::string PLUGINS_CACHE_DIR = "/data/data/com.termux/files/usr/var/lib/mkapk/plugins/";
 
     /**
@@ -42,7 +42,7 @@ namespace MkapkPluginManager {
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<> dis(0, 15);
-        
+
         std::string secure_token = "";
         for (int i = 0; i < 16; i++) {
             secure_token += "0123456789abcdef"[dis(gen)];
@@ -59,7 +59,7 @@ namespace MkapkPluginManager {
         } guard{staging_dir};
 
         UI::info("Decompressing raw extension components data payloads into isolated enclave...");
-        
+
         // Use '-j' flag to completely flatten directories (prevents ZipSlip / Path Traversal)
         if (!MkapkEnv::run_system_cmd({"unzip", "-j", "-q", src_zip.string(), "-d", staging_dir.string()})) {
             UI::error("Failed to unpack targeted extension installer bundle wrapper safely.");
@@ -121,25 +121,25 @@ namespace MkapkPluginManager {
         mf.close();
 
         // STRICT SANITIZATION: Eliminate basic command injections before downstream parsing
-        if (plug_name.empty() || comp_bin.empty() || 
+        if (plug_name.empty() || comp_bin.empty() ||
             plug_name.find('/') != std::string::npos || plug_name.find('.') != std::string::npos) {
             UI::error("Malicious or incomplete target handle identifiers parsed inside initialization schema frameworks.");
             return false;
         }
 
         UI::info("Validating localization context dependencies mapping trees for driver compiler safely: " + comp_bin);
-        
+
         // 5. DEPENDENCY RESOLUTION
         bool compiler_exists = false;
         fs::path termux_bin_check = fs::path("/data/data/com.termux/files/usr/bin") / comp_bin;
-        
+
         if (fs::exists(termux_bin_check)) {
             compiler_exists = true;
         } else {
             pid_t check_pid;
             char* query_args[] = { const_cast<char*>("which"), const_cast<char*>(comp_bin.c_str()), nullptr };
             int check_spawn = posix_spawnp(&check_pid, "which", nullptr, nullptr, query_args, ::environ);
-            
+
             if (check_spawn == 0) {
                 int check_wait;
                 waitpid(check_pid, &check_wait, 0);
@@ -150,7 +150,7 @@ namespace MkapkPluginManager {
         if (!compiler_exists) {
             if (!apt_pkg.empty()) {
                 UI::info("Binary interface missing locally. Bridging tool discovery channels securely to Termux package indexes: " + apt_pkg);
-                
+
                 if (!MkapkEnv::run_system_cmd({"apt", "install", "-y", apt_pkg})) {
                     UI::warn("Automated apt synchronization engine tracking returned execution anomaly flags.\n"
                              "   Please implement standalone terminal tracking steps for binary path: '" + comp_bin + "' manual installations.");
@@ -166,19 +166,19 @@ namespace MkapkPluginManager {
         // 6. ATOMIC COMMITAL TO PERSISTENT CACHE
         fs::create_directories(PLUGINS_CACHE_DIR);
         fs::path final_dest = fs::path(PLUGINS_CACHE_DIR) / plug_name;
-        
+
         // Lock destination
         fs::remove_all(final_dest);
         fs::create_directories(final_dest);
 
-        // Because we are moving verified files from an isolated, randomized directory, 
+        // Because we are moving verified files from an isolated, randomized directory,
         // we eliminate the TOCTOU gap entirely.
         fs::copy_file(manifest_path, final_dest / "plugin.json", fs::copy_options::overwrite_existing);
-        
+
         std::ofstream vs(final_dest / "verified.status");
         if (vs.is_open()) {
             // Hardcoded to "1" because unverified plugins are now strictly rejected above.
-            vs << "1"; 
+            vs << "1";
             vs.close();
         }
 

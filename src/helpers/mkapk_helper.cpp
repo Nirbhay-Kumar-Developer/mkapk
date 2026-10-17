@@ -19,31 +19,31 @@ Result<void> smart_run(const std::vector<std::string>& args, const std::string& 
     std::string tool_name = (last_slash == std::string::npos) ? tool_path : tool_path.substr(last_slash + 1);
 
     // [ANTI-FREEZE PATCH]: Bypass the isolated Java Daemon for apksigner on Release builds.
-    // This allows the native child process to cleanly inherit the parent's terminal 
+    // This allows the native child process to cleanly inherit the parent's terminal
     // stdin context so you can type your password securely.
-    bool is_release_signing = (tool_name == "apksigner" && 
+    bool is_release_signing = (tool_name == "apksigner" &&
                                std::find(args.begin(), args.end(), "androiddebugkey") == args.end());
 
-    bool use_daemon = (tool_name == "d8" || tool_name == "r8" || 
+    bool use_daemon = (tool_name == "d8" || tool_name == "r8" ||
                        tool_name == "javac" || tool_name == "resguard" ||
-                       (tool_name == "apksigner" && !is_release_signing) || 
+                       (tool_name == "apksigner" && !is_release_signing) ||
                        tool_name == "kotlinc");
 
     if (use_daemon) {
         std::vector<std::string> daemon_args = args;
-        daemon_args[0] = tool_name; 
-        
+        daemon_args[0] = tool_name;
+
         // Return the IPC execution result so failures are propagated up the pipeline
         return IpcClient::call_java_tool(daemon_args);
     } else {
         // Delegate to the centralized POSIX spawn execution handler
         bool success = MkapkEnv::run_system_cmd(args);
-        
+
         if (!success) {
-            return Result<void>::error("External tool runtime execution anomaly flags raised inside (" + 
+            return Result<void>::error("External tool runtime execution anomaly flags raised inside (" +
                                        tool_name + "). Message mapping reference context: " + err_msg);
         }
-        
+
         return Result<void>::success();
     }
 }
