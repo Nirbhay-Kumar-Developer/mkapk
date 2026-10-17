@@ -1,5 +1,4 @@
 #include <zip.h>
-#include <__ostream/basic_ostream.h>
 #include <vector>
 #include <zipconf.h>
 #include <string>
@@ -48,7 +47,7 @@ Result<void> run_incremental_dex(
     const fs::path& dex_cache,
     const std::vector<fs::path>& files_to_dex,
     const std::vector<fs::path>& extra_jvm_classpaths,
-    RunFunc run) 
+    RunFunc run)
 {
     if (files_to_dex.empty()) return Result<void>::success();
 
@@ -85,8 +84,11 @@ Result<void> run_incremental_dex(
 
         std::string family_key = (rel_path.parent_path() / base_name).string();
 
+        // Recognize R/Manifest classes even when passed as .class paths from java_out
+        bool is_gen_family = is_gen || fs::exists(abs_gen_path / rel_path.parent_path() / (base_name + ".java"));
+
         // Collect generated R.java / Manifest.java classes for a single batched D8 pass
-        if (is_gen) {
+        if (is_gen_family) {
             if (!seen_gen_families.insert(family_key).second) continue;
             if (fs::exists(class_dir)) {
                 for (const auto& entry : fs::directory_iterator(class_dir)) {
@@ -129,7 +131,7 @@ Result<void> run_incremental_dex(
             fs::create_directories(temp_dex_dir);
 
             std::vector<std::string> d8_args = {
-                D8, 
+                D8,
                 "--min-api", "21",
                 "--lib", fs::absolute(android_jar).string(),
                 "--classpath", abs_java_out.string(),
@@ -202,6 +204,17 @@ Result<void> run_incremental_dex(
             return res;
         }
 
+        // Purge previous gen_r_classes*.dex before renaming fresh outputs
+        if (fs::exists(dex_cache)) {
+            for (const auto& entry : fs::directory_iterator(dex_cache)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".dex") {
+                    if (entry.path().stem().string().rfind("gen_r_classes", 0) == 0) {
+                        fs::remove(entry.path());
+                    }
+                }
+            }
+        }
+
         int gen_idx = 1;
         for (const auto& entry : fs::directory_iterator(temp_gen_dir)) {
             if (entry.is_regular_file() && entry.path().extension() == ".dex") {
@@ -243,9 +256,9 @@ Result<void> run_dex_r8(
     }
 
     const char* prefix_env = std::getenv("PREFIX");
-    fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/" 
+    fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/"
                                           : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
-    fs::path annotations_jar = kotlin_lib_root / "annotations-13.0.jar"; 
+    fs::path annotations_jar = kotlin_lib_root / "annotations-13.0.jar";
 
     std::string min_api_val = config.min_sdk.empty() ? "21" : config.min_sdk;
 
@@ -281,7 +294,7 @@ Result<void> run_dex_r8(
             args.push_back(fs::absolute(aapt_rules).string());
         }
 
-        // 2. Discover and forward all library consumer rules
+        // 2. Discover and forward all library consumer rules for active project dependencies
         std::set<std::string> seen_rules;
         std::vector<std::string> rule_filenames = {
             "proguard.txt",
@@ -289,7 +302,7 @@ Result<void> run_dex_r8(
             "proguard.pro"
         };
 
-        // Path A: Inspect directories of supplied dependency JARs/AARs
+        // Path A: Inspect directories of supplied dependency JARs/AARs (<dependency_dir>/extracted_aar/)
         for (const auto& jar : extra_dependency_jars) {
             fs::path dir = jar.parent_path();
             for (const auto& name : rule_filenames) {
@@ -343,26 +356,6 @@ Result<void> run_dex_r8(
                         }
                     }
                     zip_close(archive);
-                }
-            }
-        }
-
-        // Path C: Recursively scan the mkapk library cache for any loose rule files
-        fs::path mkapk_cache_lib = MkapkEnv::get_dependency_cache_dir();
-
-        if (fs::exists(mkapk_cache_lib)) {
-            for (const auto& entry : fs::recursive_directory_iterator(mkapk_cache_lib)) {
-                if (entry.is_regular_file()) {
-                    std::string fname = entry.path().filename().string();
-                    if (std::find(rule_filenames.begin(), rule_filenames.end(), fname) != rule_filenames.end()) {
-                        if (fs::file_size(entry.path()) > 0) {
-                            std::string abs_rule = fs::absolute(entry.path()).string();
-                            if (seen_rules.insert(abs_rule).second) {
-                                args.push_back("--pg-conf");
-                                args.push_back(abs_rule);
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -428,7 +421,7 @@ Result<void> run_dex_d8(
     const fs::path& android_jar,
     const fs::path& bin_dir,
     const fs::path& dex_cache,
-    RunFunc run_func) 
+    RunFunc run_func)
 {
     fs::path bin_dir_path = fs::absolute(bin_dir);
     std::vector<std::string> inputs;
