@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <iterator>
 #include <utility>
+#include <algorithm>
 
 #define XXH_INLINE_ALL
 #include <xxhash.h>
@@ -45,6 +46,50 @@ std::string get_file_hash(const fs::path& file_path) {
         if (XXH3_64bits_update(state, buffer, file.gcount()) == XXH_ERROR) {
             XXH3_freeState(state);
             return "";
+        }
+    }
+
+    XXH64_hash_t hash = XXH3_64bits_digest(state);
+    XXH3_freeState(state);
+
+    std::stringstream stream;
+    stream << std::setfill('0') << std::setw(16) << std::hex << hash;
+    return stream.str();
+}
+
+/**
+ * Computes a deterministic XXH3 64-bit hash of an entire directory:
+ * 1. Collects all regular files recursively.
+ * 2. Sorts lexicographically by relative generic paths to guarantee repeatability across OS platforms.
+ * 3. Streams each relative path and file content hash into XXH3_64bits_update.
+ */
+std::string get_dir_hash(const fs::path& dir_path) {
+    if (!fs::exists(dir_path) || !fs::is_directory(dir_path)) {
+        return "";
+    }
+
+    std::vector<std::pair<std::string, fs::path>> file_entries;
+    for (const auto& entry : fs::recursive_directory_iterator(dir_path)) {
+        if (entry.is_regular_file()) {
+            file_entries.emplace_back(fs::relative(entry.path(), dir_path).generic_string(), entry.path());
+        }
+    }
+
+    std::sort(file_entries.begin(), file_entries.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
+
+    XXH3_state_t* state = XXH3_createState();
+    if (!state) return "";
+    XXH3_64bits_reset(state);
+
+    std::vector<char> buffer(65536); // 64KB buffer for optimal I/O throughput
+    for (const auto& [rel_path, abs_path] : file_entries) {
+        XXH3_64bits_update(state, rel_path.data(), rel_path.size());
+
+        std::ifstream file(abs_path, std::ios::binary);
+        while (file.read(buffer.data(), buffer.size()) || file.gcount()) {
+            XXH3_64bits_update(state, buffer.data(), file.gcount());
         }
     }
 
@@ -142,7 +187,7 @@ static std::vector<fs::path> expand_java_dependencies(
 }
 
 /**
- * SECTION 3: CONCRETE CHANGE CHECKER IMPLEMENTATION
+ * SECTION 2: CONCRETE CHANGE CHECKER IMPLEMENTATION
  */
 class IncrementalChangeChecker : public IChangeChecker {
 public:
@@ -211,6 +256,7 @@ public:
         // Expand Java changes to all dependent classes
         results.changed_files["java"] = expand_java_dependencies(src_path, directly_changed_java);
 
+
         // 4. Scan Resources
         fs::path res_path = MkapkEnv::resolve_path(config.res_dir);
         if (fs::exists(res_path)) {
@@ -243,10 +289,24 @@ public:
             }
         }
 
-        // 6. Source Deletions Check
+        // 6. Source, Resource & Asset Deletions Check
         for (auto const& [old_path, hash] : old_state["src"]) {
             if (next_state.find("src|" + old_path) == next_state.end()) {
                 results.deleted_files["src"].push_back(fs::path(old_path));
+            }
+        }
+
+        for (auto const& [old_path, hash] : old_state["res"]) {
+            if (next_state.find("res|" + old_path) == next_state.end()) {
+                results.deleted_files["res"].push_back(fs::path(old_path));
+                results.res_changed = true;
+            }
+        }
+
+        for (auto const& [old_path, hash] : old_state["asset"]) {
+            if (next_state.find("asset|" + old_path) == next_state.end()) {
+                results.deleted_files["asset"].push_back(fs::path(old_path));
+                results.assets_changed = true;
             }
         }
 
@@ -281,7 +341,8 @@ public:
         fs::path config_json_path = fs::current_path() / "config.json";
         std::string config_hash = fs::exists(config_json_path) ? get_file_hash(config_json_path) : "";
         next_state["meta|config"] = config_hash;
-        bool config_changed = (config_hash != old_state["meta"]["config"]) || results.mode_switched;
+        results.config_changed = (config_hash != old_state["meta"]["config"]) || results.mode_switched;
+        bool config_changed = results.config_changed;
 
         // 12. General Source Modification Flag
         bool has_source_changes = !results.deleted_files["src"].empty();
@@ -293,9 +354,7 @@ public:
         }
         results.src_changed = has_source_changes;
 
-        // -------------------------------------------------------------
         // 13. ACTIONABLE DECISION DIRECTIVES
-        // -------------------------------------------------------------
 
         // Manifest, resource, or configuration changes require an aapt2 link pass
         results.needs_manifest_relink = results.manifest_changed || results.res_changed || config_changed || force_all;
@@ -324,7 +383,7 @@ public:
 };
 
 /**
- * SECTION 4: PUBLIC INTERFACE EXPORTS
+ * SECTION 3: PUBLIC INTERFACE EXPORTS
  */
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
     const fs::path& build_dir,

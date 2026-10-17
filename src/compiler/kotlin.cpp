@@ -19,12 +19,12 @@ Result<void> compile_incremental_kotlin(
     RunFunc run_func,
     const std::string& compose_plugin,
     bool is_release,
-    const std::vector<std::string>& classpath_extra) 
+    const std::vector<std::string>& classpath_extra)
 {
     if (changed_files.empty()) return Result<void>::success();
 
-    UI::stage(UI::Msg::STAGE_KOTLIN, "Compiling " + std::to_string(changed_files.size()) + " files (Release: " + (is_release ? "true" : "false") + ")");
-    
+    UI::stage(UI::Msg::STAGE_KOTLIN, "Compiling " + std::to_string(changed_files.size() + "files");
+
     fs::create_directories(classes_dir);
 
     // Track paths to deduplicate while maintaining resolution priority
@@ -126,6 +126,6 @@ Result<void> compile_incremental_kotlin(
 
     auto res = run_func(args, "Kotlin compilation (kotlinc) failed");
     if (res.is_err()) return res;
-    
+
     return Result<void>::success();
 }

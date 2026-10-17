@@ -72,6 +72,8 @@ public:
 };
 
 std::string get_file_hash(const fs::path& file_path);
+std::string get_dir_hash(const fs::path& dir_path);
+
 std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
     const fs::path& bin_dir,
     const MkapkConfig& config,

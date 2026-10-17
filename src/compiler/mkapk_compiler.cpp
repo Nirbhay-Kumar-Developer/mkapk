@@ -4,6 +4,7 @@
 #include <map>
 #include <algorithm>
 #include <utility>
+#include <fstream>
 
 #include "mkapk_helpers.hpp"
 #include "mkapk_tools.hpp"
@@ -16,8 +17,8 @@ namespace fs = std::filesystem;
 /**
  * Removes compiled .class and .dex files when the source is deleted.
  */
-void cleanup_stale_assets(const std::map<std::string, std::vector<fs::path>>& deleted_files, 
-                         const fs::path& java_out, 
+void cleanup_stale_assets(const std::map<std::string, std::vector<fs::path>>& deleted_files,
+                         const fs::path& java_out,
                          const fs::path& dex_cache) {
     for (auto const& [lang, files] : deleted_files) {
         for (const auto& rel_path : files) {
@@ -48,13 +49,13 @@ Result<void> execute_plugin_compiler(
     const fs::path& java_out,
     const fs::path& bin_dir,
     const fs::path& android_jar,
-    RunFunc run) 
+    RunFunc run)
 {
     if (files.empty()) return Result<void>::success();
 
     std::string details = "Compiling " + std::to_string(files.size()) + " files via " + plugin.compiler;
     if (plugin.is_verified) {
-        details += " [Verified Driver]";
+        details += " [Verified]";
     }
     UI::stage(plugin.name, details);
 
@@ -68,8 +69,8 @@ Result<void> execute_plugin_compiler(
     } else if (plugin.output_type == "native") {
         fs::path native_out_dir = bin_dir / "libs" / "obj";
         fs::create_directories(native_out_dir);
-        
-        args.push_back("-c"); 
+
+        args.push_back("-c");
         args.push_back("-I" + fs::absolute(android_jar).parent_path().string());
     }
 
@@ -78,6 +79,37 @@ Result<void> execute_plugin_compiler(
     }
 
     return run(args, plugin.name + " pipeline execution error");
+}
+
+// Helper to purge stale .class files of a .java file before recompiling:
+static void purge_stale_classes_for_sources(
+    const std::vector<fs::path>& java_sources,
+    const fs::path& src_dir,
+    const fs::path& gen_dir,
+    const fs::path& java_out)
+{
+    for (const auto& src_file : java_sources) {
+        fs::path abs_src = fs::absolute(src_file);
+        fs::path rel_path;
+        if (abs_src.string().rfind(gen_dir.string(), 0) == 0) {
+            rel_path = fs::relative(abs_src, gen_dir);
+        } else if (abs_src.string().rfind(src_dir.string(), 0) == 0) {
+            rel_path = fs::relative(abs_src, src_dir);
+        } else {
+            continue;
+        }
+
+        std::string base_name = rel_path.stem().string();
+        fs::path parent_dir = java_out / rel_path.parent_path();
+        if (fs::exists(parent_dir)) {
+            for (const auto& entry : fs::directory_iterator(parent_dir)) {
+                std::string fname = entry.path().filename().string();
+                if (fname == base_name + ".class" || fname.rfind(base_name + "$", 0) == 0) {
+                    fs::remove(entry.path());
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -93,11 +125,11 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
     std::map<std::string, std::vector<fs::path>>& deleted_files,
     bool do_res,
     RunFunc run,
-    const std::vector<fs::path>& extra_jvm_classpaths) 
+    const std::vector<fs::path>& extra_jvm_classpaths)
 {
     fs::path java_out = fs::absolute(bin_dir / "classes" / "java_classes");
     fs::path dex_cache = fs::absolute(bin_dir / "dex_cache");
-    fs::path gen_src = fs::absolute(bin_dir / "gen"); 
+    fs::path gen_src = fs::absolute(bin_dir / "gen");
 
     fs::create_directories(java_out);
     fs::create_directories(dex_cache);
@@ -117,11 +149,20 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
         unified_java_sources = changed_files["java"];
     }
 
-    if (fs::exists(gen_src)) {
+    bool r_classes_missing = true;
+    if (fs::exists(java_out)) {
+        for (const auto& entry : fs::recursive_directory_iterator(java_out)) {
+            if (entry.is_regular_file() && entry.path().filename() == "R.class") {
+                r_classes_missing = false;
+                break;
+            }
+        }
+    }
+
+    if ((do_res || r_classes_missing) && fs::exists(gen_src)) {
         for (const auto& entry : fs::recursive_directory_iterator(gen_src)) {
             if (entry.is_regular_file() && entry.path().extension() == ".java") {
                 fs::path absolute_gen_path = fs::absolute(entry.path());
-                
                 if (std::find(unified_java_sources.begin(), unified_java_sources.end(), absolute_gen_path) == unified_java_sources.end()) {
                     unified_java_sources.push_back(absolute_gen_path);
                 }
@@ -136,7 +177,7 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
         std::string compose_plug = config.compose_plugin;
         std::vector<fs::path> joint_sources = changed_files["kotlin"];
         joint_sources.insert(joint_sources.end(), unified_java_sources.begin(), unified_java_sources.end());
-        
+
         bool is_release = (bin_dir.string().find("release") != std::string::npos);
 
         auto kot_res = compile_incremental_kotlin(
@@ -154,23 +195,116 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
         }
     }
 
-    // --- PHASE 3: CORE JVM JAVA BYTECODE GENERATION ---
-    if (changed_files.find("java") != changed_files.end() && !changed_files["java"].empty()) {
-        std::string java_ver = config.java_version;
-        if (java_ver.empty()) java_ver = "17";
-        
-        UI::stage(UI::Msg::STAGE_JAVA, std::to_string(changed_files["java"].size()) + " files");
+    // --- PHASE 3: ABI-AWARE INCREMENTAL JAVA BYTECODE GENERATION ---
+    fs::path abs_src_dir = fs::absolute(MkapkEnv::resolve_path(config.src_dir));
+    fs::path bytecode_state_file = fs::absolute(bin_dir / ".hashes" / "bytecode_graph.bin");
+    fs::path impacted_list_file = fs::absolute(bin_dir / ".hashes" / "impacted_java.txt");
+    fs::create_directories(bytecode_state_file.parent_path());
+
+    bool has_direct_java = (changed_files.find("java") != changed_files.end() && !changed_files["java"].empty());
+    bool has_deleted_src = (deleted_files.find("src") != deleted_files.end() && !deleted_files["src"].empty());
+    bool has_kotlin_changes = (changed_files.find("kotlin") != changed_files.end() && !changed_files["kotlin"].empty());
+
+    std::string java_ver = config.java_version.empty() ? "17" : config.java_version;
+
+    // Pass 1: Compile directly modified Java sources
+    if (has_direct_java) {
+        purge_stale_classes_for_sources(changed_files["java"], abs_src_dir, gen_src, java_out);
+
+        UI::stage(UI::Msg::STAGE_JAVA, std::to_string(changed_files["java"].size()) + " modified file(s)");
         auto java_res = compile_incremental_java(
-            java_ver, 
-            {}, 
-            fs::absolute(android_jar), 
-            fs::absolute(java_out), 
-            changed_files["java"], 
+            java_ver,
+            {},
+            fs::absolute(android_jar),
+            java_out,
+            changed_files["java"],
             run,
             extra_jvm_classpaths
         );
         if (java_res.is_err()) {
             return Result<std::pair<fs::path, fs::path>>::error(java_res.get_error());
+        }
+    }
+
+    // Run Bytecode ABI & Dependency Analysis if any JVM sources were modified or deleted
+    if (has_direct_java || has_deleted_src || has_kotlin_changes) {
+        if (fs::exists(impacted_list_file)) fs::remove(impacted_list_file);
+
+        std::vector<std::string> dep_args = {
+            "javadeps",
+            "analyze",
+            java_out.string(),
+            abs_src_dir.string(),
+            bytecode_state_file.string(),
+            impacted_list_file.string()
+        };
+
+        for (const auto& f : changed_files["java"]) {
+            dep_args.push_back(fs::absolute(f).string());
+        }
+        if (has_deleted_src) {
+            for (const auto& rel_del : deleted_files["src"]) {
+                dep_args.push_back((abs_src_dir / rel_del).string());
+            }
+        }
+
+        auto analyze_res = run(dep_args, "Bytecode dependency analysis failed");
+        if (analyze_res.is_err()) {
+            return Result<std::pair<fs::path, fs::path>>::error(analyze_res.get_error());
+        }
+
+        // Read impacted downstream .java files that require recompilation due to ABI changes
+        std::vector<fs::path> impacted_java_files;
+        if (fs::exists(impacted_list_file)) {
+            std::ifstream in(impacted_list_file);
+            std::string line;
+            while (std::getline(in, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                if (!line.empty() && fs::exists(line)) {
+                    impacted_java_files.emplace_back(line);
+                }
+            }
+            fs::remove(impacted_list_file);
+        }
+
+        // Pass 2: Recompile only ABI-impacted dependent Java files
+        if (!impacted_java_files.empty()) {
+            purge_stale_classes_for_sources(impacted_java_files, abs_src_dir, gen_src, java_out);
+
+            UI::stage(UI::Msg::STAGE_JAVA, std::to_string(impacted_java_files.size()) + " ABI-dependent file(s)");
+            auto pass2_res = compile_incremental_java(
+                java_ver,
+                {},
+                fs::absolute(android_jar),
+                java_out,
+                impacted_java_files,
+                run,
+                extra_jvm_classpaths
+            );
+            if (pass2_res.is_err()) {
+                return Result<std::pair<fs::path, fs::path>>::error(pass2_res.get_error());
+            }
+
+            // Append Pass 2 files to changed_files["java"] so D8 only re-dexes recompiled classes
+            for (const auto& impacted : impacted_java_files) {
+                if (std::find(changed_files["java"].begin(), changed_files["java"].end(), impacted) == changed_files["java"].end()) {
+                    changed_files["java"].push_back(impacted);
+                }
+            }
+
+            // Refresh graph cache with the newly compiled Pass 2 .class files
+            std::vector<std::string> update_args = {
+                "javadeps",
+                "update",
+                java_out.string(),
+                abs_src_dir.string(),
+                bytecode_state_file.string(),
+                impacted_list_file.string()
+            };
+            auto update_res = run(update_args, "Failed updating bytecode dependency graph");
+            if (update_res.is_err()) {
+                return Result<std::pair<fs::path, fs::path>>::error(update_res.get_error());
+            }
         }
     }
 

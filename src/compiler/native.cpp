@@ -22,14 +22,14 @@ static std::mutex console_mutex;
  * and secures async lambda memory scopes.
  */
 bool compile_native(
-    const std::string& NDK_BIN, 
+    const std::string& NDK_BIN,
     const fs::path& src_dir,
     const fs::path& bin_dir,
     const std::vector<std::string>& arch_list,
     const std::string& target_api,
     RunFunc run_func,
     const std::vector<fs::path>& changed_files,
-    const MkapkConfig& config) 
+    const MkapkConfig& config)
 {
     if (config.native_targets.empty()) {
         std::lock_guard<std::mutex> lock(console_mutex);
@@ -40,7 +40,7 @@ bool compile_native(
     std::vector<std::string> includes;
     const char* prefix_env = std::getenv("PREFIX");
     fs::path termux_usr_include = prefix_env ? fs::path(prefix_env) / "include" : "/data/data/com.termux/files/usr/include";
-    
+
     if (fs::exists(termux_usr_include)) {
         includes.push_back("-I" + termux_usr_include.string());
     }
@@ -55,7 +55,7 @@ bool compile_native(
 
     // --- LAUNCH TARGET-AND-ARCHITECTURE COMPILATION MATRIX IN PARALLEL ---
     for (const auto& target : config.native_targets) {
-        
+
         // Filter down target sources to compute what needs an active build pass
         std::vector<fs::path> target_files_to_compile;
         bool target_has_cpp = false;
@@ -111,7 +111,7 @@ bool compile_native(
                     {
                         UI::info("[" + apk_lib_dir + "] " + target.name + " <= " + src_file.filename().string());
                     }
-                    
+
                     std::vector<std::string> cc_args = {
                         active_compiler, "-c", src_file.string(),
                         "-o", fs::absolute(obj_file).string(),
@@ -123,7 +123,7 @@ bool compile_native(
                     cc_args.insert(cc_args.end(), target.extra_flags.begin(), target.extra_flags.end());
 
                     run_func(cc_args, "Compilation failed for [" + target.name + "] on ABI [" + apk_lib_dir + "] for file: " + src_file.filename().string());
-                    
+
                     // Track that compilation actually occurred in this pass
                     objects_updated = true;
                 }
@@ -143,11 +143,11 @@ bool compile_native(
                 // 3. Isolated Linking Phase (.o -> target-specific .so)
                 // OPTIMIZED: Only link if objects were recompiled OR if the .so does not exist.
                 if (!obj_list.empty() && (objects_updated || !fs::exists(output_so))) {
-                    
+
                     {
                         UI::info("[" + apk_lib_dir + "] Linked lib" + target.name + ".so");
                     }
-                    
+
                     std::vector<std::string> ld_args = {
                         compiler_cpp, "-shared",
                         "-target", arch + target_api,
@@ -158,7 +158,7 @@ bool compile_native(
                     if (target_has_cpp) {
                         ld_args.push_back("-lc++_shared");
                     }
-                    
+
                     ld_args.insert(ld_args.end(), target.extra_flags.begin(), target.extra_flags.end());
 
                     run_func(ld_args, "Linking failed for custom binary target configuration module: lib" + target.name + " (" + apk_lib_dir + ")");

@@ -66,6 +66,6 @@ Result<void> compile_incremental_java(
 
     auto res = run_func(args, "Incremental Java compilation (javac) failed");
     if (res.is_err()) return res;
-    
+
     return Result<void>::success();
 }
