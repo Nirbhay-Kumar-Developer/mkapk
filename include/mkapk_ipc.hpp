@@ -7,17 +7,16 @@
 #include "mkapk_result.hpp"
 
 namespace IpcClient {
-
-    /**
-     * Initializes the background JVM daemon.
-     * @param classpath The assembled JNI classpath for the Java process.
-     */
+    
+    const std::vector<std::string>& get_last_daemon_output();
+    
+    // Initializes the background JVM daemon.
     Result<void> start_daemon(const std::string& classpath);
 
     /**
      * Gracefully tears down the background daemon.
      */
-    Result<void> stop_daemon();
+    void stop_daemon();
 
     /**
      * Dispatches a structured JSON command to the daemon.
@@ -25,10 +24,7 @@ namespace IpcClient {
      * @param args The command-line arguments for the tool.
      * @param out_logs Buffer to store raw log lines for further processing.
      */
-    Result<void> execute_tool(const std::string& command, 
-                              const std::vector<std::string>& args, 
-                              std::vector<std::string>& out_logs);
-
+    Result<void> call_java_tool(const std::vector<std::string>& args);
 }
 
 #endif // MKAPK_IPC_HPP

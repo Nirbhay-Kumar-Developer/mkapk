@@ -46,6 +46,8 @@ public class ToolRouter {
             case "r8"             -> new SimpleToolHandler("com.android.tools.r8.R8");
             case "resguard"       -> new SimpleToolHandler("com.tencent.mm.resourceproguard.cli.CliMain");
             case "apksigner"      -> new SimpleToolHandler("com.android.apksigner.ApkSignerTool");
+            case "manifestmerger" -> new ManifestMergerHandler();
+            case "resolve"        -> new DependencyResolver(dynamicClassPathUrls);
             case "kotlinc"        -> new KotlinHandler();
             default               -> null;
         };

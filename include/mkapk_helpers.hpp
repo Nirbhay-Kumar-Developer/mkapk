@@ -16,13 +16,10 @@
 
 namespace fs = std::filesystem;
 
-using RunFunc = std::function<Result<void>(const std::vector<std::string>&, const std::string&)>;
-
 namespace MkapkEnv {
     fs::path resolve_path(std::string path_str);
-    fs::path get_android_jar(MkapkConfig& config);
-    std::string get_tool_path(const std::string& name, MkapkConfig& config);
-    std::filesystem::path get_android_jar(const MkapkConfig& config);
+    std::string get_tool_path(const std::string& name, const MkapkConfig& config);
+    fs::path get_android_jar(const MkapkConfig& config);
     std::map<std::string, std::string> get_tools_map(const MkapkConfig& config);
     std::string get_jni_classpath(const MkapkConfig& config);
     bool init_project();
@@ -44,14 +41,10 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
     std::map<std::string, std::vector<fs::path>>& changed_files,
     std::map<std::string, std::vector<fs::path>>& deleted_files,
     bool do_res,
-    RunFunc run
+    RunFunc run,
+    const std::vector<fs::path>& extra_jvm_classpaths = {}
 );
 
-Result<void> start_daemon(const std::string& classpath);
-
-void stop_daemon();
-const std::vector<std::string>& get_last_daemon_output();
-Result<void> call_java_tool(const std::vector<std::string>& args);
 Result<void> smart_run(const std::vector<std::string>& args, const std::string& err_msg);
 
 void auto_place_system_libraries(
@@ -61,18 +54,5 @@ void auto_place_system_libraries(
 );
 
 std::string perform_build(const std::vector<std::string>& raw_args, const MkapkConfig& config);
-
-std::pair<BuildResults, std::map<std::string, std::string>> check_changes(
-    const fs::path& bin_dir, 
-    const MkapkConfig& config, 
-    bool force_all,
-    bool is_release
-);
-
-void save_state(
-    const fs::path& bin_dir, 
-    const std::map<std::string, std::string>& next_state,
-    bool is_release
-);
 
 #endif // MKAPK_HELPERS_HPP

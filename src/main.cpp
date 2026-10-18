@@ -3,82 +3,16 @@
 #include <string>
 #include <algorithm>
 #include <filesystem>
-#include <sstream>
+#include <cstdio>
+#include <exception>
+#include <mutex>
 #include "mkapk_helpers.hpp"
-#include "mkapk_tools.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_plugin_manager.hpp"
+#include "mkapk_ipc.hpp"
+#include "mkapk_config.hpp"
 
 namespace fs = std::filesystem;
-
-#ifndef SHARE_PATH
-   #define SHARE_PATH "/data/data/com.termux/files/usr/share/mkapk/"
-#endif
-
-class JavaWarningFilterBuf : public std::streambuf {
-private:
-    std::streambuf* orig_buf;
-    std::string line_buffer;
-    
-    int sequence_state = 0;
-    std::vector<std::string> buffered_lines;
-
-    const std::vector<std::string> TARGET_SEQUENCE = {
-        "WARNING: A terminally deprecated method in java.lang.System has been called",
-        "WARNING: System::setSecurityManager has been called by com.mkapk.tools.MkapkTools (file:/data/data/com.termux/files/usr/share/mkapk/mkapk-coordinator.jar)",
-        "WARNING: Please consider reporting this to the maintainers of com.mkapk.tools.MkapkTools",
-        "WARNING: System::setSecurityManager will be removed in a future release"
-    };
-
-    void flush_held_lines() {
-        for (const auto& line : buffered_lines) {
-            orig_buf->sputn(line.data(), line.size());
-            orig_buf->sputc('\n');
-        }
-        buffered_lines.clear();
-        sequence_state = 0;
-    }
-
-protected:
-    int overflow(int c) override {
-        if (c == EOF) return EOF;
-
-        if (c == '\n') {
-            if (sequence_state < 4 && line_buffer == TARGET_SEQUENCE[sequence_state]) {
-                buffered_lines.push_back(line_buffer);
-                sequence_state++;
-
-                if (sequence_state == 4) {
-                    buffered_lines.clear();
-                    sequence_state = 0;
-                }
-            } else {
-                buffered_lines.push_back(line_buffer);
-                flush_held_lines();
-            }
-            line_buffer.clear();
-        } else {
-            line_buffer.push_back(static_cast<char>(c));
-        }
-        return c;
-    }
-
-    int sync() override {
-        if (!line_buffer.empty()) {
-            buffered_lines.push_back(line_buffer);
-            line_buffer.clear();
-        }
-        flush_held_lines();
-        return orig_buf->pubsync();
-    }
-
-public:
-    explicit JavaWarningFilterBuf(std::streambuf* original) : orig_buf(original) {}
-    
-    ~JavaWarningFilterBuf() override {
-        sync();
-    }
-};
 
 void show_help() {
     std::lock_guard<std::mutex> lock(UI::get_console_mutex());
@@ -104,7 +38,7 @@ void show_help() {
 
 bool clean_build_directory(bool target_release, bool target_debug) {
     size_t deleted_count = 0;
-    
+
     // If no flags are passed explicitly, clean both by default
     if (!target_release && !target_debug) {
         target_release = true;
@@ -127,7 +61,7 @@ bool clean_build_directory(bool target_release, bool target_debug) {
     };
 
     UI::info("Cleaning build directories...");
-    
+
     if (target_debug) {
         clear_path(fs::absolute("build/debug"));
     }
@@ -145,9 +79,7 @@ int main(int argc, char* argv[]) {
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
     std::streambuf* old_cerr_buf = std::cerr.rdbuf();
-    JavaWarningFilterBuf filter_buf(old_cerr_buf);
-    std::cerr.rdbuf(&filter_buf);
-    
+
     std::vector<std::string> args(argv + 1, argv + argc);
 
     if (args.empty() || args[0] == "help" || args[0] == "--help") {
@@ -168,7 +100,7 @@ int main(int argc, char* argv[]) {
         if (command == "clean") {
             bool target_release = std::find(args.begin(), args.end(), "-r") != args.end();
             bool target_debug = std::find(args.begin(), args.end(), "-d") != args.end();
-            
+
             bool success = clean_build_directory(target_release, target_debug);
             std::cerr.rdbuf(old_cerr_buf);
             return success ? 0 : 1;
@@ -211,7 +143,7 @@ int main(int argc, char* argv[]) {
 
             bool is_release = std::find(args.begin(), args.end(), "-release") != args.end();
             bool ndk_all = std::find(args.begin(), args.end(), "-ndk-all") != args.end();
-            
+
             std::string arch_target = "";
             auto arch_it = std::find(args.begin(), args.end(), "-arch");
             if (arch_it != args.end() && (arch_it + 1) != args.end()) {
@@ -227,15 +159,15 @@ int main(int argc, char* argv[]) {
             }
 
             UI::stage(UI::Msg::BUILD_START, build_details);
-            
+
             // PASS CONFIG STRUCT TO HELPERS
             std::string daemon_classpath = MkapkEnv::get_jni_classpath(config);
-            start_daemon(daemon_classpath); 
-            
+            IpcClient::start_daemon(daemon_classpath);
+
             try {
                 // PASS CONFIG STRUCT TO BUILD PIPELINE
                 std::string result = perform_build(args, config);
-                stop_daemon();
+                IpcClient::stop_daemon();
 
                 if (result == "up-to-date") {
                     UI::success(UI::Msg::BUILD_UP_TO_DATE, "");
@@ -243,26 +175,26 @@ int main(int argc, char* argv[]) {
                     UI::success(UI::Msg::BUILD_SUCCESS);
                     UI::info("Artifact Location: " + result);
                 }
-            } 
+            }
             catch (const std::exception& build_err) {
-                stop_daemon();
+                IpcClient::stop_daemon();
                 UI::error("Build interrupted.", build_err.what());
                 std::cerr.rdbuf(old_cerr_buf);
-                return 1; 
-            } 
+                return 1;
+            }
             catch (...) {
-                stop_daemon();
+                IpcClient::stop_daemon();
                 UI::error(UI::Msg::FATAL_INTERNAL);
                 std::cerr.rdbuf(old_cerr_buf);
                 return 1;
             }
-        } 
+        }
         else {
             UI::error("Unknown command: '" + command + "'. Use 'mkapk help' to get a list of supported commands.");
             std::cerr.rdbuf(old_cerr_buf);
             return 1;
         }
-    } 
+    }
     catch (const std::exception& e) {
         UI::error("Fatal Error", e.what());
         std::cerr.rdbuf(old_cerr_buf);
