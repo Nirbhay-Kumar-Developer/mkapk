@@ -23,7 +23,7 @@ Result<void> compile_incremental_kotlin(
 {
     if (changed_files.empty()) return Result<void>::success();
 
-    UI::stage(UI::Msg::STAGE_KOTLIN, "Compiling " + std::to_string(changed_files.size() + "files");
+    UI::stage(UI::Msg::STAGE_KOTLIN, "Compiling " + std::to_string(changed_files.size()) + " files");
 
     fs::create_directories(classes_dir);
 
