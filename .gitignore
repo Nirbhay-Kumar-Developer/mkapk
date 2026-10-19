@@ -4,3 +4,5 @@ compile_commands.json
 .cache
 dependencies/
 mkapk-aarch64.deb
+config/target
+

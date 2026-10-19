@@ -18,7 +18,6 @@ STORAGE_PATH="$(pwd)"
 LOCAL_PATH="$HOME/mkapk_tmp_build"
 CACHE_DIR="$LOCAL_PATH/.cache"
 BUILD_DIR="$LOCAL_PATH/build/$BUILD_MODE"
-DEPS_DIR="$LOCAL_PATH/dependencies"
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 SDK_LIB="${SDK_ROOT:-$HOME/android-sdk/Sdk}/cmdline-tools/latest/lib"
@@ -28,34 +27,28 @@ KOTLIN_LIB="$PREFIX/opt/kotlin/lib"
 MANIFEST_FILE="config/MANIFEST.MF"
 POM_FILE="config/pom.xml"
 
-# Ensure required tools are installed
-for tool in xxhsum rsync javac jar make mvn; do
+for tool in xxhsum rsync javac jar make mvn python3 readelf dpkg-deb; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo ">> Error: '$tool' is required. Install missing dependencies." >&2
         exit 1
     fi
 done
 
-# Validate required configuration files
-if [[ ! -f "$MANIFEST_FILE" ]]; then
-    echo ">> Error: Required manifest '$MANIFEST_FILE' not found." >&2
-    exit 1
-fi
-
-if [[ ! -f "$POM_FILE" ]]; then
-    echo ">> Error: Required dependency POM '$POM_FILE' not found." >&2
+if [[ ! -f "$MANIFEST_FILE" || ! -f "$POM_FILE" ]]; then
+    echo ">> Error: Required files '$MANIFEST_FILE' or '$POM_FILE' missing." >&2
     exit 1
 fi
 
 # --- Trap: Persist Build State Back to Storage on Exit ---
 trap '
-    mkdir -p "$STORAGE_PATH/build" "$STORAGE_PATH/.cache" "$STORAGE_PATH/dependencies"
+    mkdir -p "$STORAGE_PATH/build" "$STORAGE_PATH/.cache" "$STORAGE_PATH/config/target"
     rsync -a "$LOCAL_PATH/build/" "$STORAGE_PATH/build/" 2>/dev/null || true
     rsync -a "$LOCAL_PATH/.cache/" "$STORAGE_PATH/.cache/" 2>/dev/null || true
-    rsync -a "$LOCAL_PATH/dependencies/" "$STORAGE_PATH/dependencies/" 2>/dev/null || true
+    rsync -a "$LOCAL_PATH/config/target/" "$STORAGE_PATH/config/target/" 2>/dev/null || true
+    rsync -a "$LOCAL_PATH/$PKG_NAME/data/data/com.termux/files/usr/share/doc/mkapk/" \
+             "$STORAGE_PATH/$PKG_NAME/data/data/com.termux/files/usr/share/doc/mkapk/" 2>/dev/null || true
 ' EXIT
 
-# --- Helper Hash Functions ---
 hash_dir() {
     find "$1" -type f -exec xxhsum {} + 2>/dev/null | sort | xxhsum | cut -d' ' -f1
 }
@@ -71,6 +64,7 @@ mkdir -p "$LOCAL_PATH"
 rsync -a --update --delete \
     --exclude='build/' \
     --exclude='.cache/' \
+    --exclude='config/target/' \
     --exclude='*.deb' \
     "$STORAGE_PATH/" "$LOCAL_PATH/"
 
@@ -80,39 +74,20 @@ fi
 if [[ ! -d "$LOCAL_PATH/.cache" && -d "$STORAGE_PATH/.cache" ]]; then
     rsync -a "$STORAGE_PATH/.cache/" "$LOCAL_PATH/.cache/"
 fi
-if [[ ! -d "$LOCAL_PATH/dependencies" && -d "$STORAGE_PATH/dependencies" ]]; then
-    rsync -a "$STORAGE_PATH/dependencies/" "$LOCAL_PATH/dependencies/"
+if [[ ! -d "$LOCAL_PATH/config/target" && -d "$STORAGE_PATH/config/target" ]]; then
+    mkdir -p "$LOCAL_PATH/config/target"
+    rsync -a "$STORAGE_PATH/config/target/" "$LOCAL_PATH/config/target/"
 fi
 
 cd "$LOCAL_PATH"
-mkdir -p "$CACHE_DIR" "$BUILD_DIR" "$DEPS_DIR"
-
+mkdir -p "$CACHE_DIR" "$BUILD_DIR"
 echo "$BUILD_MODE" > "$CACHE_DIR/build_mode"
 
-# --- 1. Dependency Resolution & Caching ---
-CURRENT_POM_HASH="$(hash_files "$POM_FILE")"
-OLD_POM_HASH="$(cat "$CACHE_DIR/pom.hash" 2>/dev/null || true)"
+# --- 1. Environment & Local SDK Classpath Discovery (Not Redistributed) ---
+export JAVA_HOME="${JAVA_HOME:-"$PREFIX/lib/jvm/java-21-openjdk"}"
+export PATH="$JAVA_HOME/bin:$PATH"
 
-# Re-resolve if pom.xml changed or dependencies folder has no JARs
-if [[ "$CURRENT_POM_HASH" != "$OLD_POM_HASH" || -z "$(ls -A "$DEPS_DIR"/*.jar 2>/dev/null)" ]]; then
-    echo ">> Resolving and downloading dependencies from $POM_FILE..."
-    rm -rf "$DEPS_DIR" "$STORAGE_PATH/dependencies"
-    mvn -f "$POM_FILE" dependency:copy-dependencies \
-        -DoutputDirectory="$DEPS_DIR" \
-        -DincludeScope=runtime \
-        -Dsilent=true
-
-    echo "$CURRENT_POM_HASH" > "$CACHE_DIR/pom.hash"
-    echo ">> Dependencies cached in $DEPS_DIR"
-else
-    echo ">> Dependencies up to date (cached in $DEPS_DIR)."
-fi
-
-# --- Classpath Configuration Dictionary ---
-# Recursively targets ManifestMerger, common (ILogger), sdklib, R8, Kotlin, and dependencies
-declare -A CLASSPATH_MAP=(
-    ["downloaded_deps"]="$DEPS_DIR/*.jar"
-    ["mkapk_share"]="$MKAPK_SHARE/*.jar"
+declare -A LOCAL_SDK_MAP=(
     ["java_share"]="$JAVA_SHARE/*.jar"
     ["kotlin_libs"]="$KOTLIN_LIB/*.jar"
     ["r8"]="$SDK_LIB/**/r8*.jar"
@@ -121,17 +96,14 @@ declare -A CLASSPATH_MAP=(
     ["sdklib"]="$SDK_LIB/**/*sdklib*.jar"
 )
 
-# Dynamically construct the classpath string in memory
-assemble_classpath() {
+assemble_maven_extra_classpath() {
     local -a valid_entries=()
     local -A seen_paths=()
     local resolved_path
 
-    # Enable globstar and nullglob so ** searches recursively and unmatched patterns expand to nothing
     shopt -s globstar nullglob
-    for key in "${!CLASSPATH_MAP[@]}"; do
-        local target="${CLASSPATH_MAP[$key]}"
-
+    for key in "${!LOCAL_SDK_MAP[@]}"; do
+        local target="${LOCAL_SDK_MAP[$key]}"
         for resolved_path in $target; do
             if [[ -f "$resolved_path" && "$resolved_path" == *.jar ]]; then
                 if [[ -z "${seen_paths[$resolved_path]:-}" ]]; then
@@ -143,48 +115,45 @@ assemble_classpath() {
     done
     shopt -u globstar nullglob
 
-    local IFS=":"
+    # Comma-delimited for maven-compiler-plugin <additionalClasspathElements>
+    local IFS=","
     echo "${valid_entries[*]}"
 }
 
-CLASS_PATH="$(assemble_classpath)"
+EXTRA_SDK_CLASSPATH="$(assemble_maven_extra_classpath)"
 
-# Clean up deprecated classpath.txt if present from previous builds
-rm -f scripts/classpath.txt
-
-# --- 2. Environment Setup ---
-export JAVA_HOME="${JAVA_HOME:-"$PREFIX/lib/jvm/java-21-openjdk"}"
-export PATH="$JAVA_HOME/bin:$PATH"
-
-# --- 3. Compile C++ Native Engine ---
+# --- 2. Compile C++ Native Engine ---
 echo ">> Running Makefile (Incremental) in $BUILD_MODE mode..."
 make -j"$(nproc)" BUILD_MODE="$BUILD_MODE"
 
-# --- 4. Compile Java Coordinator ---
+# --- 3. Delegate Java Coordinator & License Extraction to Maven ---
 JAVA_SRC_DIR="./java"
-JAVA_BIN_DIR="$BUILD_DIR/java_out"
+MAVEN_TARGET="$LOCAL_PATH/config/target"
 JAR_NAME="mkapk-coordinator.jar"
-JAR_PATH="$BUILD_DIR/$JAR_NAME"
+JAR_PATH="$MAVEN_TARGET/$JAR_NAME"
+DEPS_DIR="$MAVEN_TARGET/dependencies"
 
-echo ">> Checking Java Coordinator..."
-CURRENT_JAVA_HASH="$(hash_dir "$JAVA_SRC_DIR")$(hash_files "$MANIFEST_FILE")$(echo -n "$CLASS_PATH" | xxhsum | cut -d' ' -f1)"
+echo ">> Checking Java Coordinator & Maven Dependencies..."
+CURRENT_JAVA_HASH="$(hash_dir "$JAVA_SRC_DIR")$(hash_files "$MANIFEST_FILE" "$POM_FILE")$(echo -n "$EXTRA_SDK_CLASSPATH" | xxhsum | cut -d' ' -f1)"
 OLD_JAVA_HASH="$(cat "$CACHE_DIR/java_${BUILD_MODE}.hash" 2>/dev/null || true)"
 
-if [[ "$CURRENT_JAVA_HASH" != "$OLD_JAVA_HASH" || ! -f "$JAR_PATH" ]]; then
-    echo "   [JAVA] Changes detected ($BUILD_MODE). Compiling Java sources..."
-    mkdir -p "$JAVA_BIN_DIR" "scripts"
-    
-    find "$JAVA_SRC_DIR" -name "*.java" > scripts/sources.txt
-    
-    # -proc:none disables annotation processors bundled inside Maven/Plexus dependency jars
-    javac -proc:none -d "$JAVA_BIN_DIR" @scripts/sources.txt -cp "$CLASS_PATH"
-    
-    jar cvfm "$JAR_PATH" "$MANIFEST_FILE" -C "$JAVA_BIN_DIR" .
+if [[ "$CURRENT_JAVA_HASH" != "$OLD_JAVA_HASH" || ! -f "$JAR_PATH" || -z "$(ls -A "$DEPS_DIR"/*.jar 2>/dev/null)" ]]; then
+    echo "   [MAVEN] Compiling Java sources, copying runtime deps, and extracting licenses..."
+    rm -rf "$DEPS_DIR"
+    mvn -f "$POM_FILE" package \
+        -Dextra.classpath="$EXTRA_SDK_CLASSPATH" \
+        -Dsilent=true
+
+    cp "$JAR_PATH" "$BUILD_DIR/$JAR_NAME"
     echo "$CURRENT_JAVA_HASH" > "$CACHE_DIR/java_${BUILD_MODE}.hash"
     echo ">> Updated $JAR_PATH"
 else
-    echo "   [JAVA] Up to date ($BUILD_MODE). Skipping compilation."
+    cp "$JAR_PATH" "$BUILD_DIR/$JAR_NAME" 2>/dev/null || true
+    echo "   [MAVEN] Up to date ($BUILD_MODE). Skipping Maven build."
 fi
+
+# --- 4. Auto-Generate Debian Copyright (C++ ELF + Third-Party + Maven) ---
+python3 "$LOCAL_PATH/scripts/generate_copyright.py" "$BUILD_MODE"
 
 # --- 5. Package Assembly & Deployment ---
 DEB_ROOT="$LOCAL_PATH/$PKG_NAME"
@@ -192,8 +161,9 @@ PREFIX_PATH="$DEB_ROOT/data/data/com.termux/files/usr"
 BIN_DEST="$PREFIX_PATH/bin"
 SHARE_DEST="$PREFIX_PATH/share/mkapk"
 LIB_DEST="$SHARE_DEST/lib"
+COPYRIGHT_PATH="$PREFIX_PATH/share/doc/mkapk/copyright"
 
-DEB_INPUT_HASH="$(hash_files "$BUILD_DIR/mkapk" "$JAR_PATH" "$CACHE_DIR/build_mode")$(hash_dir "$DEPS_DIR")"
+DEB_INPUT_HASH="$(hash_files "$BUILD_DIR/mkapk" "$JAR_PATH" "$COPYRIGHT_PATH" "$CACHE_DIR/build_mode")$(hash_dir "$DEPS_DIR")"
 if [[ -d "$DEB_ROOT/DEBIAN" ]]; then
     DEB_INPUT_HASH+="$(hash_dir "$DEB_ROOT/DEBIAN")"
 fi
@@ -204,18 +174,15 @@ if [[ "$DEB_INPUT_HASH" != "$OLD_DEB_HASH" || ! -f "${PKG_NAME}.deb" ]]; then
     mkdir -p "$BIN_DEST" "$SHARE_DEST" "$LIB_DEST"
 
     cp "$BUILD_DIR/mkapk" "$BIN_DEST/"
-    
     if [[ "$BUILD_MODE" == "release" ]]; then
         echo ">> Stripping binary for release..."
         strip "$BIN_DEST/mkapk" 2>/dev/null || true
-    else
-        echo ">> Preserving debug symbols in package..."
     fi
-    
+
     cp "$JAR_PATH" "$SHARE_DEST/"
 
-    # Copy cached dependencies into debian payload under $PREFIX/share/mkapk/lib/
-    echo ">> Packaging dependencies into $LIB_DEST..."
+    # Clean old jars before copying fresh Maven runtime dependencies
+    rm -f "$LIB_DEST"/*.jar
     cp "$DEPS_DIR"/*.jar "$LIB_DEST/"
 
     echo ">> Setting Permissions..."
@@ -237,7 +204,3 @@ if [[ "$DEB_INPUT_HASH" != "$OLD_DEB_HASH" || ! -f "${PKG_NAME}.deb" ]]; then
 else
     echo "✨ Everything is up to date! Skipping .deb rebuild and installation."
 fi
-
-echo "Binary:  $PREFIX/bin/mkapk"
-echo "Library: $PREFIX/share/mkapk/$JAR_NAME"
-echo "Deps:    $PREFIX/share/mkapk/lib/"

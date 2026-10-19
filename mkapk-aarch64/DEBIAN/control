@@ -1,9 +1,10 @@
 Package: mkapk
 Version: 0.4.0
-Section: utils
+Section: devel
 Priority: optional
-Architecture: all
+Architecture: aarch64
 Maintainer: Nirbhay Kumar <dev.nirbhaykumar@gmail.com>
+Homepage: https://github.com/Nirbhay-Kumar-Developer/mkapk
 Depends: openjdk-21, openssl, aapt2, apksigner, ndk-multilib, clang, binutils, libzip
 Description: Modular Android Build System designed for Termux
  A lightweight, modular build system designed to compile Java, 
