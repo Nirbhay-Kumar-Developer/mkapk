@@ -89,7 +89,7 @@ bool merge_manifests(
         fs::copy_file(temp_output_path, final_output_path, fs::copy_options::overwrite_existing, ec);
         fs::remove(temp_output_path, ec);
 
-        UI::info("Manifest merging completed.";
+        UI::info("Manifest merging completed.");
         return true;
     } else {
         UI::error("Merged manifest not found at: " + output_manifest);
