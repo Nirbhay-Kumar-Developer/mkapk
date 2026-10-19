@@ -4,13 +4,17 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.mkapk</groupId>
-    <artifactId>mkapk-dependencies</artifactId>
-    <version>1.0.0</version>
+    <artifactId>mkapk-coordinator</artifactId>
+    <version>0.4.0</version>
 
     <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.version>3.9.9</maven.version>
         <resolver.version>1.9.22</resolver.version>
         <slf4j.version>1.7.36</slf4j.version>
+        <!-- Colon-separated local SDK/Termux JARs passed from compile.sh -->
+        <extra.classpath></extra.classpath>
     </properties>
 
     <dependencies>
@@ -52,4 +56,94 @@
             <version>${slf4j.version}</version>
         </dependency>
     </dependencies>
+
+    <build>
+        <sourceDirectory>${project.basedir}/../java</sourceDirectory>
+        <directory>${project.basedir}/target</directory>
+
+        <plugins>
+            <!-- 1. Export Maven dependency classpath & copy runtime JARs -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.8.0</version>
+                <executions>
+                    <execution>
+                        <id>build-compile-classpath</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>build-classpath</goal>
+                        </goals>
+                        <configuration>
+                            <outputProperty>maven.dep.cp</outputProperty>
+                            <silent>true</silent>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/dependencies</outputDirectory>
+                            <includeScope>runtime</includeScope>
+                            <silent>true</silent>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- 2. Compile Java sources combining Maven deps + local SDK classpath -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>17</release>
+                    <compilerArgs>
+                        <arg>-proc:none</arg>
+                        <arg>-Xlint:-removal</arg>
+                        <arg>-cp</arg>
+                        <arg>${maven.dep.cp}:${extra.classpath}</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <!-- 3. Package mkapk-coordinator.jar with config/MANIFEST.MF -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <finalName>mkapk-coordinator</finalName>
+                    <archive>
+                        <manifestFile>${project.basedir}/MANIFEST.MF</manifestFile>
+                        <addMavenDescriptor>false</addMavenDescriptor>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <!-- 4. Generate THIRD-PARTY.txt for Maven runtime dependencies -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>license-maven-plugin</artifactId>
+                <version>2.4.0</version>
+                <executions>
+                    <execution>
+                        <id>generate-third-party</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>add-third-party</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/generated-sources/license</outputDirectory>
+                            <thirdPartyFilename>THIRD-PARTY.txt</thirdPartyFilename>
+                            <includeTransitiveDependencies>true</includeTransitiveDependencies>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
