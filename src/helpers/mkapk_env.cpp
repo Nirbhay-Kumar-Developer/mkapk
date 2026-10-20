@@ -143,12 +143,20 @@ namespace MkapkEnv {
     }
 
     fs::path get_android_jar(const MkapkConfig& config) {
-        if (config.sdk_root.empty() || config.target_sdk.empty()) {
+        if (config.target_sdk.empty()) {
             UI::error("SDK Configuration Error",
-            "Both 'sdk_root' and 'target_sdk' must be configured in 'config.json'. Set SDK_ROOT to ~/android-sdk/Sdk if you don't handle Android SDK manually.");
+            "'target_sdk' must be configured in 'config.json'.");
             std::exit(1);
         }
-        fs::path sdk_root = resolve_path(config.sdk_root);
+        
+        fs::path sdk_root;
+        if (config.sdk_root.empty()) {
+            const char* home = std::getenv("HOME");
+            sdk_root = fs::path(home) / "android-sdk" / "Sdk";
+        } else {
+            sdk_root = resolve_path(config.sdk_root);
+        }
+        
         fs::path target_platform_dir = sdk_root / "platforms" / ("android-" + config.target_sdk);
         fs::path jar_path = target_platform_dir / "android.jar";
 
@@ -241,9 +249,16 @@ namespace MkapkEnv {
         // 1. MKAPK COORDINATOR & PRIVATE MAVEN DEPENDENCIES ($PREFIX/share/mkapk/)
         fs::path mkapk_dir = termux_share / "mkapk";
         if (fs::exists(mkapk_dir)) {
-            for (const auto& entry : fs::recursive_directory_iterator(mkapk_dir)) {
-                if (entry.is_regular_file() && entry.path().extension() == ".jar") {
-                    add_cp(entry.path());
+            for (auto it = fs::recursive_directory_iterator(mkapk_dir);
+            it != fs::recursive_directory_iterator(); ++it) {
+                
+                // Skip descending into the tools directory
+                if (it->is_directory() && it->path().filename() == "tools") {
+                    it.disable_recursion_pending();
+                    continue;
+                }
+                if (it->is_regular_file() && it->path().extension() == ".jar") {
+                    add_cp(it->path());
                 }
             }
         } else {
@@ -266,11 +281,12 @@ namespace MkapkEnv {
             add_cp(kotlin_preloader);
         }
 
-        // 4. ANDROID SDK CMDLINE-TOOLS (R8, D8, ManifestMerger & its nested runtime dependencies)
-        if (!config.sdk_root.empty()) {
-            fs::path sdk_root = resolve_path(config.sdk_root);
-            fs::path cmdline_lib = sdk_root / "cmdline-tools/latest/lib";
-
+        // 5. ANDROID SDK CMDLINE-TOOLS (R8, D8, ManifestMerger & its nested runtime dependencies)
+        if (std::string sdk_root_str = !config.sdk_root.empty() ? config.sdk_root : "~/android-sdk/Sdk"; !sdk_root_str.empty()) { 
+            
+            fs::path sdk_root = resolve_path(sdk_root_str);
+            fs::path cmdline_lib = sdk_root / "cmdline-tools/latest/lib"; 
+            
             if (fs::exists(cmdline_lib)) {
                 for (const auto& entry : fs::recursive_directory_iterator(cmdline_lib)) {
                     if (entry.is_regular_file() && entry.path().extension() == ".jar") {
@@ -284,10 +300,10 @@ namespace MkapkEnv {
                 UI::warn("Android SDK cmdline-tools missing at: " + cmdline_lib.string());
             }
         } else {
-            UI::warn("SDK_ROOT variable not set in project configuration file. Set its value to ~/android-sdk/Sdk for default.");
+            UI::warn("SDK_ROOT variable not set and default Android SDK is not installed.");
         }
 
-        // 5. ASSEMBLE DELIMITED CLASSPATH STRING
+        // 6. ASSEMBLE DELIMITED CLASSPATH STRING
         std::string full_cp = "";
         for (size_t i = 0; i < cp_entries.size(); ++i) {
             full_cp += cp_entries[i] + (i == cp_entries.size() - 1 ? "" : ":");

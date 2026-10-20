@@ -5,6 +5,7 @@
 #include <utility>
 #include <future>
 #include <mutex>
+#include <system_error>
 
 #include "pipeline_stage.hpp"
 #include "mkapk_ui.hpp"
@@ -15,17 +16,25 @@
 
 namespace fs = std::filesystem;
 
-// Helper to align an APK with an isolated destination path per task
-static fs::path align_apk_isolated(const std::string& ZIPALIGN, const std::string& alignment,
-                                   const fs::path& in_apk, const fs::path& dest_apk, RunFunc run_func) {
-    if (fs::exists(dest_apk)) fs::remove(dest_apk);
+static Result<fs::path> align_apk_isolated(const std::string& ZIPALIGN, const std::string& alignment,
+                                           const fs::path& in_apk, const fs::path& dest_apk, RunFunc run_func) {
+    if (fs::exists(dest_apk)) {
+        fs::remove(dest_apk);
+    }
 
-    run_func({
+    // Android zipalign accepts: zipalign -f -P <pagesize_kb> <align> <infile> <outfile>
+    // Note: '-P' cannot be used in combination with '-p'.
+    auto align_res = run_func({
         ZIPALIGN, "-f", "-P", "16", alignment,
         in_apk.string(), dest_apk.string()
-    }, "Zipalign verification and translation run dropped tracking error boundaries.");
+    }, "Running zipalign on " + in_apk.filename().string());
 
-    return dest_apk;
+    if (align_res.is_err() || !fs::exists(dest_apk)) {
+        std::string err_msg = align_res.is_err() ? align_res.get_error() : "Aligned output file not created.";
+        return Result<fs::path>::error("Zipalign failed for " + in_apk.filename().string() + ": " + err_msg);
+    }
+
+    return Result<fs::path>::success(dest_apk);
 }
 
 Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& ctx) {
@@ -35,7 +44,6 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
 
     fs::path base_unsigned_apk = ctx.build_dir / "unsigned.apk";
 
-    // Safety check: recover base container if an upstream anomaly missed it
     if (!ctx.resources_triggered && !fs::exists(base_unsigned_apk)) {
         UI::warn("Base container missing. Forcing resource link pass resolution...");
         auto link_res = link_manifest(ctx.tools["aapt2"], base_unsigned_apk, ctx.android_jar, ctx.active_manifest_path, ctx.build_dir, ctx.src_dir, ctx.run_func, !ctx.is_release);
@@ -47,12 +55,11 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
     }
 
     // --- SINGLE-PASS RESOURCE OBFUSCATION ---
-    // Obfuscate the resource container once before distributing to ABI tasks
     fs::path base_container = base_unsigned_apk;
     fs::path obfuscated_cached_apk = ctx.build_dir / "unsigned_obfuscated.apk";
 
     if (ctx.is_release) {
-        fs::path resguard_jar = MkapkEnv::resolve_path("~/AndResGuard/AndResGuard-cli-1.2.15.jar");
+        fs::path resguard_jar = MkapkEnv::resolve_path("/data/data/com.termux/files/usr/share/mkapk/tools/AndResGuard-cli-1.2.15.jar");
         fs::path config_xml = fs::current_path() / "andresguard-config.xml";
         if (!fs::exists(config_xml)) config_xml = fs::current_path() / "andresguard.xml";
 
@@ -82,7 +89,7 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
         }
     }
 
-    // Resolve keystore configuration
+    // Keystore configuration
     std::pair<std::string, std::string> ks_info;
     if (ctx.is_release) {
         fs::path resolved_ks = MkapkEnv::resolve_path(config.keystore);
@@ -113,44 +120,42 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
         package_matrix.push_back({profile_suffix, ctx.compile_architectures});
     }
 
-    // Mutex to serialize console prompts during interactive release signing
-    std::mutex signing_console_mutex;
+    std::mutex signing_ipc_mutex;
     std::vector<std::future<Result<std::string>>> workers;
     workers.reserve(package_matrix.size());
 
-    // --- PARALLEL PACKAGING PER TARGET ABI ---
     for (const auto& task : package_matrix) {
-        workers.push_back(std::async(std::launch::async, [&, task, base_container]() -> Result<std::string> {
+        workers.push_back(std::async(std::launch::async, [&ctx, &config, &ks_info, &signing_ipc_mutex, task, base_container]() -> Result<std::string> {
             fs::path loop_unsigned = ctx.build_dir / ("unsigned" + task.filename_suffix + ".apk");
 
-            // Clone the prepared resource container (obfuscated if release)
-            fs::copy_file(base_container, loop_unsigned, fs::copy_options::overwrite_existing);
+            std::error_code ec;
+            fs::copy_file(base_container, loop_unsigned, fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                return Result<std::string>::error("Failed to copy base APK for " + task.filename_suffix + ": " + ec.message());
+            }
 
-            // Inject classes.dex, assets, and target ABI .so libraries
             auto inject_res = inject_assets_and_dex(loop_unsigned, ctx.build_dir, config.assets_dir, task.target_abis, ctx.is_release);
             if (inject_res.is_err()) {
                 if (fs::exists(loop_unsigned)) fs::remove(loop_unsigned);
                 return Result<std::string>::error(inject_res.get_error());
             }
 
-            // Zipalign to an isolated temp path per ABI to avoid data race file collisions
             fs::path isolated_aligned_apk = ctx.build_dir / ("aligned_temp" + task.filename_suffix + ".apk");
-            align_apk_isolated(ctx.tools["zipalign"], "4", loop_unsigned, isolated_aligned_apk, ctx.run_func);
+            auto align_res = align_apk_isolated(ctx.tools["zipalign"], "4", loop_unsigned, isolated_aligned_apk, ctx.run_func);
+            if (align_res.is_err()) {
+                if (fs::exists(loop_unsigned)) fs::remove(loop_unsigned);
+                return Result<std::string>::error(align_res.get_error());
+            }
 
             fs::path final_apk = ctx.bin_dir / (config.project_name + task.filename_suffix + ".apk");
 
-            // Execute signing (serialized in release mode if terminal prompt is required)
             Result<void> sign_res = Result<void>::success();
-            if (ctx.is_release) {
-                std::lock_guard<std::mutex> lock(signing_console_mutex);
-                UI::stage(UI::Msg::STAGE_SIGN, final_apk.filename().string());
-                sign_res = sign_apk(ctx.tools["apksigner"], final_apk, isolated_aligned_apk, ks_info.first, ks_info.second, ctx.run_func);
-            } else {
+            {
+                std::lock_guard<std::mutex> lock(signing_ipc_mutex);
                 UI::stage(UI::Msg::STAGE_SIGN, final_apk.filename().string());
                 sign_res = sign_apk(ctx.tools["apksigner"], final_apk, isolated_aligned_apk, ks_info.first, ks_info.second, ctx.run_func);
             }
 
-            // Clean up intermediates
             if (fs::exists(loop_unsigned)) fs::remove(loop_unsigned);
             if (fs::exists(isolated_aligned_apk)) fs::remove(isolated_aligned_apk);
 
@@ -177,9 +182,6 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
 
     save_state(ctx.build_dir, ctx.new_state, ctx.is_release);
 
-    ctx.final_output_msg = ctx.ndk_all ?
-        "Split architecture packaging structural distribution layout written within: " + ctx.bin_dir.string() :
-        dynamic_ret_path;
-
+    ctx.final_output_msg = ctx.ndk_all ? ctx.bin_dir.string() : dynamic_ret_path;
     return Result<void>::success();
 }

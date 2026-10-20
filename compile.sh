@@ -206,10 +206,11 @@ if [[ "$DEB_INPUT_HASH" != "$OLD_DEB_HASH" || ! -f "${PKG_NAME}.deb" ]]; then
     # Clean old jars before copying fresh Maven runtime dependencies
     rm -f "$LIB_DEST"/*.jar
     cp "$DEPS_DIR"/*.jar "$LIB_DEST/"
-    
+
     # Copy vendored jars
     if compgen -G "$LOCAL_PATH/libs/*.jar" > /dev/null; then
-        cp "$LOCAL_PATH/libs"/*.jar "$LIB_DEST/"
+        mkdir -p "$SHARE_DEST/tools"
+        cp "$LOCAL_PATH/libs"/*.jar "$SHARE_DEST/tools/"
     fi
 
     echo ">> Setting Permissions..."

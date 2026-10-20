@@ -44,7 +44,7 @@ public class ToolRouter {
             case "javac"          -> new JavacHandler(dynamicClassPathUrls);
             case "d8"             -> new SimpleToolHandler("com.android.tools.r8.D8");
             case "r8"             -> new SimpleToolHandler("com.android.tools.r8.R8");
-            case "resguard"       -> new SimpleToolHandler("com.tencent.mm.resourceproguard.cli.CliMain");
+            case "resguard"       -> new SimpleToolHandler("com.tencent.mm.resourceproguard.cli.CliMain", "/data/data/com.termux/files/usr/share/mkapk/tools/AndResGuard-cli-1.2.15.jar");
             case "apksigner"      -> new SimpleToolHandler("com.android.apksigner.ApkSignerTool");
             case "manifestmerger" -> new ManifestMergerHandler();
             case "resolve"        -> new DependencyResolver(dynamicClassPathUrls);
