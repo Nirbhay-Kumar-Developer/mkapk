@@ -207,7 +207,7 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
 
     std::string java_ver = config.java_version.empty() ? "17" : config.java_version;
 
-    // Pass 1: Compile directly modified Java sources
+    // Compile directly modified Java sources
     if (has_direct_java) {
         purge_stale_classes_for_sources(changed_files["java"], abs_src_dir, gen_src, java_out);
 
@@ -225,88 +225,7 @@ Result<std::pair<fs::path, fs::path>> compile_source_logic(
             return Result<std::pair<fs::path, fs::path>>::error(java_res.get_error());
         }
     }
-
-    // Run Bytecode ABI & Dependency Analysis if any JVM sources were modified or deleted
-    if (has_direct_java || has_deleted_src || has_kotlin_changes) {
-        if (fs::exists(impacted_list_file)) fs::remove(impacted_list_file);
-
-        std::vector<std::string> dep_args = {
-            "javadeps",
-            "analyze",
-            java_out.string(),
-            abs_src_dir.string(),
-            bytecode_state_file.string(),
-            impacted_list_file.string()
-        };
-
-        for (const auto& f : changed_files["java"]) {
-            dep_args.push_back(fs::absolute(f).string());
-        }
-        if (has_deleted_src) {
-            for (const auto& rel_del : deleted_files["src"]) {
-                dep_args.push_back((abs_src_dir / rel_del).string());
-            }
-        }
-
-        auto analyze_res = run(dep_args, "Bytecode dependency analysis failed");
-        if (analyze_res.is_err()) {
-            return Result<std::pair<fs::path, fs::path>>::error(analyze_res.get_error());
-        }
-
-        // Read impacted downstream .java files that require recompilation due to ABI changes
-        std::vector<fs::path> impacted_java_files;
-        if (fs::exists(impacted_list_file)) {
-            std::ifstream in(impacted_list_file);
-            std::string line;
-            while (std::getline(in, line)) {
-                if (!line.empty() && line.back() == '\r') line.pop_back();
-                if (!line.empty() && fs::exists(line)) {
-                    impacted_java_files.emplace_back(line);
-                }
-            }
-            fs::remove(impacted_list_file);
-        }
-
-        // Pass 2: Recompile only ABI-impacted dependent Java files
-        if (!impacted_java_files.empty()) {
-            purge_stale_classes_for_sources(impacted_java_files, abs_src_dir, gen_src, java_out);
-
-            UI::stage(UI::Msg::STAGE_JAVA, std::to_string(impacted_java_files.size()) + " ABI-dependent file(s)");
-            auto pass2_res = compile_incremental_java(
-                java_ver,
-                {},
-                fs::absolute(android_jar),
-                java_out,
-                impacted_java_files,
-                run,
-                extra_jvm_classpaths
-            );
-            if (pass2_res.is_err()) {
-                return Result<std::pair<fs::path, fs::path>>::error(pass2_res.get_error());
-            }
-
-            // Append Pass 2 files to changed_files["java"] so D8 only re-dexes recompiled classes
-            for (const auto& impacted : impacted_java_files) {
-                if (std::find(changed_files["java"].begin(), changed_files["java"].end(), impacted) == changed_files["java"].end()) {
-                    changed_files["java"].push_back(impacted);
-                }
-            }
-
-            // Refresh graph cache with the newly compiled Pass 2 .class files
-            std::vector<std::string> update_args = {
-                "javadeps",
-                "update",
-                java_out.string(),
-                abs_src_dir.string(),
-                bytecode_state_file.string(),
-                impacted_list_file.string()
-            };
-            auto update_res = run(update_args, "Failed updating bytecode dependency graph");
-            if (update_res.is_err()) {
-                return Result<std::pair<fs::path, fs::path>>::error(update_res.get_error());
-            }
-        }
-    }
+    
 
     // --- PHASE 4: EXTENSIBLE DYNAMIC PLUGIN PIPELINE ---
     for (const auto& [ext, plugin] : active_plugins) {

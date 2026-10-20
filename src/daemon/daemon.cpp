@@ -299,6 +299,7 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
                     } else if (type == "FAILED") {
                         task_completed = true;
                         task_failed = true;
+                        break;
                     } else if (type == "LOG") {
                         std::string level = j.value("level", "INFO");
                         std::string message = j.value("message", "");
@@ -358,6 +359,11 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
     }
 
     daemon_logger.flush();
+    
+    if (task_failed) {
+        std::string tool = args.empty() ? "java_tool" : args[0];
+        return Result<void>::error(tool + " execution failed.");
+    }
 
     return Result<void>::success();
 }

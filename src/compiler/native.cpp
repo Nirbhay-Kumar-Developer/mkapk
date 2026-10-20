@@ -6,6 +6,8 @@
 #include <future>
 #include <mutex>
 #include <cstdlib>
+#include <atomic>
+#include <memory>
 
 #include "mkapk_config.hpp"
 #include "mkapk_tools.hpp"
@@ -51,7 +53,10 @@ bool compile_native(
     }
 
     // Container to hold handles for asynchronous thread workers
-    std::vector<std::future<void>> compile_workers;
+    std::vector<std::future<Result<void>>> compile_workers;
+
+    // Shared cancellation flag across all detached async tasks to enable fail-fast
+    auto abort_flag = std::make_shared<std::atomic<bool>>(false);
 
     // --- LAUNCH TARGET-AND-ARCHITECTURE COMPILATION MATRIX IN PARALLEL ---
     for (const auto& target : config.native_targets) {
@@ -83,9 +88,15 @@ bool compile_native(
         for (const std::string& arch : arch_list) {
             // SECURED: Capturing entirely by value [=] guarantees memory safety for detached threads
             // preventing dangling references if the stack unwinds early.
-            compile_workers.push_back(std::async(std::launch::async, [=]() {
+            compile_workers.push_back(std::async(std::launch::async, [=]() -> Result<void> {
+                if (abort_flag->load(std::memory_order_relaxed)) {
+                    return Result<void>::error("Aborted due to preceding compilation failure.");
+                }
+
                 std::string apk_lib_dir = MkapkEnv::ARCH_TO_ABI.count(arch) ? MkapkEnv::ARCH_TO_ABI.at(arch) : "unknown";
-                if (apk_lib_dir == "unknown") return;
+                if (apk_lib_dir == "unknown") {
+                    return Result<void>::success();
+                }
 
                 std::string compiler_c = "clang";
                 std::string compiler_cpp = "clang++";
@@ -100,6 +111,10 @@ bool compile_native(
 
                 // 1. Isolated Incremental Compilation Phase (.c/.cpp -> .o)
                 for (const auto& src_file : target_files_to_compile) {
+                    if (abort_flag->load(std::memory_order_relaxed)) {
+                        return Result<void>::error("Aborted due to preceding compilation failure.");
+                    }
+
                     std::string ext = src_file.extension().string();
                     std::string active_compiler = (ext == ".cpp" || ext == ".cc" || ext == ".hpp") ? compiler_cpp : compiler_c;
 
@@ -122,7 +137,11 @@ bool compile_native(
                     cc_args.insert(cc_args.end(), includes.begin(), includes.end());
                     cc_args.insert(cc_args.end(), target.extra_flags.begin(), target.extra_flags.end());
 
-                    run_func(cc_args, "Compilation failed for [" + target.name + "] on ABI [" + apk_lib_dir + "] for file: " + src_file.filename().string());
+                    auto cc_res = run_func(cc_args, "Compilation failed for [" + target.name + "] on ABI [" + apk_lib_dir + "] for file: " + src_file.filename().string());
+                    if (cc_res.is_err()) {
+                        abort_flag->store(true, std::memory_order_relaxed);
+                        return cc_res;
+                    }
 
                     // Track that compilation actually occurred in this pass
                     objects_updated = true;
@@ -143,6 +162,9 @@ bool compile_native(
                 // 3. Isolated Linking Phase (.o -> target-specific .so)
                 // OPTIMIZED: Only link if objects were recompiled OR if the .so does not exist.
                 if (!obj_list.empty() && (objects_updated || !fs::exists(output_so))) {
+                    if (abort_flag->load(std::memory_order_relaxed)) {
+                        return Result<void>::error("Aborted due to preceding compilation failure.");
+                    }
 
                     {
                         UI::info("[" + apk_lib_dir + "] Linked lib" + target.name + ".so");
@@ -161,15 +183,33 @@ bool compile_native(
 
                     ld_args.insert(ld_args.end(), target.extra_flags.begin(), target.extra_flags.end());
 
-                    run_func(ld_args, "Linking failed for custom binary target configuration module: lib" + target.name + " (" + apk_lib_dir + ")");
+                    auto ld_res = run_func(ld_args, "Linking failed for custom binary target configuration module: lib" + target.name + " (" + apk_lib_dir + ")");
+                    if (ld_res.is_err()) {
+                        abort_flag->store(true, std::memory_order_relaxed);
+                        return ld_res;
+                    }
                 }
+
+                return Result<void>::success();
             }));
         }
     }
 
     // Synchronize barrier: Block main execution thread until every single parallel ABI target worker finishes safely
+    bool has_error = false;
+    std::string first_error_msg;
+
     for (auto& worker : compile_workers) {
-        worker.get();
+        auto res = worker.get();
+        if (res.is_err() && !has_error) {
+            has_error = true;
+            first_error_msg = res.get_error();
+        }
+    }
+
+    if (has_error) {
+        UI::error("Native compilation stage failed.", first_error_msg);
+        return false;
     }
 
     return true;
