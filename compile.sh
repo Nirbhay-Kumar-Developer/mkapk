@@ -22,7 +22,6 @@ BUILD_DIR="$LOCAL_PATH/build/$BUILD_MODE"
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 SDK_LIB="${SDK_ROOT:-$HOME/android-sdk/Sdk}/cmdline-tools/latest/lib"
 JAVA_SHARE="$PREFIX/share/java"
-MKAPK_SHARE="$PREFIX/share/mkapk"
 KOTLIN_LIB="$PREFIX/opt/kotlin/lib"
 MANIFEST_FILE="config/MANIFEST.MF"
 POM_FILE="config/pom.xml"
@@ -115,8 +114,8 @@ assemble_maven_extra_classpath() {
     done
     shopt -u globstar nullglob
 
-    # Comma-delimited for maven-compiler-plugin <additionalClasspathElements>
-    local IFS=","
+    # colon-delimited
+    local IFS=":"
     echo "${valid_entries[*]}"
 }
 
@@ -163,10 +162,33 @@ SHARE_DEST="$PREFIX_PATH/share/mkapk"
 LIB_DEST="$SHARE_DEST/lib"
 COPYRIGHT_PATH="$PREFIX_PATH/share/doc/mkapk/copyright"
 
-DEB_INPUT_HASH="$(hash_files "$BUILD_DIR/mkapk" "$JAR_PATH" "$COPYRIGHT_PATH" "$CACHE_DIR/build_mode")$(hash_dir "$DEPS_DIR")"
+# --- Comprehensive Debian Input Hash ---
+# 1. Native C++ binary & build mode
+DEB_INPUT_COMPONENTS=(
+    "$BUILD_DIR/mkapk"
+    "$CACHE_DIR/build_mode"
+)
+
+# 2. Packaging control scripts & metadata (DEBIAN/control, postinst, etc.)
+DEB_CONTROL_HASH=""
 if [[ -d "$DEB_ROOT/DEBIAN" ]]; then
-    DEB_INPUT_HASH+="$(hash_dir "$DEB_ROOT/DEBIAN")"
+    DEB_CONTROL_HASH="$(hash_dir "$DEB_ROOT/DEBIAN")"
 fi
+
+# 3. Copyright file & its generator script (ensures changes in licensing script trigger rebuild)
+COPYRIGHT_INPUT_HASH="$(hash_files "$COPYRIGHT_PATH" "$LOCAL_PATH/scripts/generate_copyright.py")"
+
+# 4. Java Coordinator JAR & Maven runtime dependencies
+JAVA_INPUT_HASH="$(hash_files "$JAR_PATH")$(hash_dir "$DEPS_DIR")"
+
+# 5. Local vendored JARs (e.g. AndResGuard in libs/), if present
+VENDORED_JAR_HASH=""
+if [[ -d "$LOCAL_PATH/libs" ]]; then
+    VENDORED_JAR_HASH="$(hash_dir "$LOCAL_PATH/libs")"
+fi
+
+# Combine all components into a single deterministic fingerprint
+DEB_INPUT_HASH="$(hash_files "${DEB_INPUT_COMPONENTS[@]}")${DEB_CONTROL_HASH}${COPYRIGHT_INPUT_HASH}${JAVA_INPUT_HASH}${VENDORED_JAR_HASH}"
 OLD_DEB_HASH="$(cat "$CACHE_DIR/deb.hash" 2>/dev/null || true)"
 
 if [[ "$DEB_INPUT_HASH" != "$OLD_DEB_HASH" || ! -f "${PKG_NAME}.deb" ]]; then
@@ -184,6 +206,11 @@ if [[ "$DEB_INPUT_HASH" != "$OLD_DEB_HASH" || ! -f "${PKG_NAME}.deb" ]]; then
     # Clean old jars before copying fresh Maven runtime dependencies
     rm -f "$LIB_DEST"/*.jar
     cp "$DEPS_DIR"/*.jar "$LIB_DEST/"
+    
+    # Copy vendored jars
+    if compgen -G "$LOCAL_PATH/libs/*.jar" > /dev/null; then
+        cp "$LOCAL_PATH/libs"/*.jar "$LIB_DEST/"
+    fi
 
     echo ">> Setting Permissions..."
     find "$DEB_ROOT" -type d -exec chmod 755 {} +
