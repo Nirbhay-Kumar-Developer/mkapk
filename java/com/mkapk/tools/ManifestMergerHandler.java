@@ -35,6 +35,7 @@ public class ManifestMergerHandler implements ToolHandler {
         String minSdk = null;
         String targetSdk = null;
         List<String> manifestFiles = new ArrayList<>();
+        List<File> activeJarFiles = new ArrayList<>();
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -42,13 +43,18 @@ public class ManifestMergerHandler implements ToolHandler {
                 minSdk = args[++i];
             } else if ("--target-sdk".equals(arg) && i + 1 < args.length) {
                 targetSdk = args[++i];
+            } else if ("--jar".equals(arg) && i + 1 < args.length) {
+                File jarFile = new File(args[++i]);
+                if (jarFile.exists()) {
+                    activeJarFiles.add(jarFile);
+                }
             } else {
                 manifestFiles.add(arg);
             }
         }
 
         if (manifestFiles.size() < 2) {
-            errStream.println("Usage: manifestmerger [--min-sdk <val>] [--target-sdk <val>] <mainManifest> <outputManifest> [libraryManifests...]");
+            errStream.println("Usage: manifestmerger [--min-sdk <val>] [--target-sdk <val>] [--jar <jarPath>...] <mainManifest> <outputManifest> [libraryManifests...]");
             return false;
         }
 
@@ -93,13 +99,12 @@ public class ManifestMergerHandler implements ToolHandler {
         invoker.setOverride(ManifestSystemProperty.UsesSdk.MIN_SDK_VERSION, minSdk);
         invoker.setOverride(ManifestSystemProperty.UsesSdk.TARGET_SDK_VERSION, targetSdk);
 
-        List<File> activeJarFiles = new ArrayList<>();
+        // Collect AAR inner jars (classes.jar and secondary libs/*.jar)
         for (int i = 2; i < manifestFiles.size(); i++) {
             File libFile = new File(manifestFiles.get(i));
             if (libFile.exists()) {
                 invoker.addLibraryManifest(libFile);
 
-                // Collect active library bytecode jars (classes.jar and secondary libs/*.jar)
                 File parentDir = libFile.getParentFile();
                 if (parentDir != null) {
                     File classesJar = new File(parentDir, "classes.jar");
@@ -117,6 +122,9 @@ public class ManifestMergerHandler implements ToolHandler {
             }
         }
 
+        // Pre-parse the main application manifest to guarantee components explicitly declared by the user are never pruned
+        Set<String> primaryComponents = collectPrimaryDeclaredComponents(mainManifest);
+
         MergingReport report = invoker.merge();
         if (report.getResult().isError()) {
             report.log(logger);
@@ -129,8 +137,8 @@ public class ManifestMergerHandler implements ToolHandler {
             return false;
         }
 
-        // Fast O(1) in-memory pruning of unreferenced optional library components
-        String filteredXml = pruneUnresolvedComponents(mergedXml, activeJarFiles, outStream);
+        // Prune unreferenced optional components while strictly protecting application components
+        String filteredXml = pruneUnresolvedComponents(mergedXml, activeJarFiles, primaryComponents, outStream);
 
         if (outputManifest.getParentFile() != null) {
             outputManifest.getParentFile().mkdirs();
@@ -141,11 +149,58 @@ public class ManifestMergerHandler implements ToolHandler {
     }
 
     /**
+     * Extracts component and initializer names explicitly defined in the primary AndroidManifest.xml.
+     */
+    private Set<String> collectPrimaryDeclaredComponents(File manifestFile) {
+        Set<String> components = new HashSet<>();
+        if (!manifestFile.exists()) return components;
+
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+
+            Document doc = factory.newDocumentBuilder().parse(manifestFile);
+            Element root = doc.getDocumentElement();
+            String appPackage = root.getAttribute("package");
+
+            NodeList appList = root.getElementsByTagName("application");
+            if (appList.getLength() == 0) return components;
+
+            Element appElement = (Element) appList.item(0);
+            List<String> tags = Arrays.asList("activity", "service", "receiver", "provider", "activity-alias", "meta-data");
+
+            for (String tag : tags) {
+                NodeList nodes = appElement.getElementsByTagName(tag);
+                for (int i = 0; i < nodes.getLength(); i++) {
+                    Element el = (Element) nodes.item(i);
+                    String name = getAttribute(el, "name");
+                    if (name != null && !name.trim().isEmpty()) {
+                        String trimmed = name.trim();
+                        components.add(trimmed);
+
+                        // Normalize relative component names to their fully-qualified names
+                        if (appPackage != null && !appPackage.isEmpty()) {
+                            if (trimmed.startsWith(".")) {
+                                components.add(appPackage + trimmed);
+                            } else if (!trimmed.contains(".")) {
+                                components.add(appPackage + "." + trimmed);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return components;
+    }
+
+    /**
      * Scans and indexes all .class entries from active JARs into a HashSet once upfront.
-     * Prevents repeated ZipFile open/parse I/O on mobile flash storage.
      */
     private Set<String> indexActiveClasses(List<File> activeJarFiles) {
-        Set<String> classSet = new HashSet<>(4096);
+        Set<String> classSet = new HashSet<>(8192);
         for (File jar : activeJarFiles) {
             if (!jar.exists()) continue;
             try (ZipFile zip = new ZipFile(jar)) {
@@ -162,11 +217,10 @@ public class ManifestMergerHandler implements ToolHandler {
         return classSet;
     }
 
-    private String pruneUnresolvedComponents(String xmlContent, List<File> activeJarFiles, PrintStream outStream) {
+    private String pruneUnresolvedComponents(String xmlContent, List<File> activeJarFiles, Set<String> primaryComponents, PrintStream outStream) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setNamespaceAware(true);
-            // Disable external DTDs and entity resolution for fast, secure local XML parsing
             factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
             factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
             factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
@@ -182,10 +236,10 @@ public class ManifestMergerHandler implements ToolHandler {
 
             Element appElement = (Element) appList.item(0);
 
-            // 1. Index all available classes once into memory
+            // Index all available classes across dependency AARs and JARs
             Set<String> classSet = indexActiveClasses(activeJarFiles);
 
-            // 2. Prune external components missing from the active classpath
+            // Prune external components missing from the active classpath
             List<String> componentTags = Arrays.asList("provider", "activity", "service", "receiver");
             for (String tag : componentTags) {
                 NodeList nodes = appElement.getElementsByTagName(tag);
@@ -195,9 +249,13 @@ public class ManifestMergerHandler implements ToolHandler {
 
                     if (className == null || className.isEmpty()) continue;
 
-                    // Application-level local classes belong to the app source; do not prune
-                    if (!className.contains(".") || className.startsWith(".") ||
-                        (appPackage != null && !appPackage.isEmpty() && className.startsWith(appPackage))) {
+                    // Application components belong to app sources or were in mainManifest: NEVER prune them
+                    boolean isAppLocal = !className.contains(".")
+                            || className.startsWith(".")
+                            || (appPackage != null && !appPackage.isEmpty() && (className.startsWith(appPackage + ".") || className.equals(appPackage)))
+                            || primaryComponents.contains(className);
+
+                    if (isAppLocal) {
                         continue;
                     }
 
@@ -209,7 +267,7 @@ public class ManifestMergerHandler implements ToolHandler {
                 }
             }
 
-            // 3. Clean unreferenced startup Initializer meta-data
+            // Clean unreferenced startup Initializer meta-data
             NodeList metaList = appElement.getElementsByTagName("meta-data");
             for (int i = metaList.getLength() - 1; i >= 0; i--) {
                 Element meta = (Element) metaList.item(i);
@@ -217,8 +275,18 @@ public class ManifestMergerHandler implements ToolHandler {
                 if ("androidx.startup".equals(metaValue)) {
                     String metaName = getAttribute(meta, "name");
                     if (metaName != null) {
+                        boolean isAppLocal = !metaName.contains(".")
+                                || metaName.startsWith(".")
+                                || (appPackage != null && !appPackage.isEmpty() && (metaName.startsWith(appPackage + ".") || metaName.equals(appPackage)))
+                                || primaryComponents.contains(metaName);
+
+                        if (isAppLocal) {
+                            continue;
+                        }
+
                         String classEntry = metaName.replace('.', '/') + ".class";
                         if (!classSet.contains(classEntry)) {
+                            outStream.println("[INFO] ManifestMerger: Pruning unreferenced startup initializer <meta-data android:name=\"" + metaName + "\">");
                             meta.getParentNode().removeChild(meta);
                         }
                     }
@@ -240,7 +308,7 @@ public class ManifestMergerHandler implements ToolHandler {
         }
     }
 
-    private String getAttribute(Element element, String localName) {
+    private static String getAttribute(Element element, String localName) {
         if (element.hasAttributeNS(ANDROID_NS, localName)) {
             return element.getAttributeNS(ANDROID_NS, localName);
         }
