@@ -56,7 +56,21 @@ public:
 
 class NativeStage : public PipelineStage {
 public:
+    // Virtual interface override
     Result<void> execute(const MkapkConfig& config, PipelineContext& ctx) override;
+
+    // Decoupled overload for thread-safe asynchronous execution (no references to PipelineContext or ctx.diff)
+    Result<void> execute(
+        const MkapkConfig& config,
+        const std::filesystem::path& src_dir,
+        const std::filesystem::path& build_dir,
+        const std::vector<std::string>& compile_architectures,
+        RunFunc run_func,
+        std::vector<std::filesystem::path> changed_files,
+        bool mode_switched,
+        bool config_changed,
+        bool force_all
+    );
 };
 
 class JvmStage : public PipelineStage {

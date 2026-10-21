@@ -229,8 +229,7 @@ Result<void> inject_assets_and_dex(
             }
         }
     }
-
-    // --- STRIP AND INJECT LAYER WITH CONDITION COMPRESSION CONTROLS ---
+    
     for (auto const& [arc_path, real_path] : injection_map) {
         zip_int64_t idx = zip_name_locate(apk, arc_path.c_str(), 0);
         if (idx >= 0) {
@@ -239,11 +238,6 @@ Result<void> inject_assets_and_dex(
 
         bool is_native_lib = (arc_path.rfind("lib/", 0) == 0 && real_path.extension() == ".so");
         fs::path file_to_inject = real_path;
-
-        // Optimization: Strip symbols from native libraries in release builds
-        if (is_release && is_native_lib) {
-            MkapkEnv::run_system_cmd({"strip", "--strip-unneeded", fs::absolute(real_path).string()});
-        }
 
         zip_source_t* src = zip_source_file(apk, file_to_inject.string().c_str(), 0, 0);
         if (src) {

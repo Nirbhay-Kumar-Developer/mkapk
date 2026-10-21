@@ -92,11 +92,43 @@ std::string perform_build(const std::vector<std::string>& raw_args, const MkapkC
 
     // STEP 1: PARALLEL EXECUTION OF NATIVE STAGE & DEPENDENCY STAGE
 
-    // Launch Native Compilation (Clang/NDK) immediately in the background
+    // Safely snapshot native changed files and flags on the main thread
+    std::vector<fs::path> changed_native_files;
+    auto nat_it = ctx.diff.changed_files.find("native");
+    if (nat_it != ctx.diff.changed_files.end()) {
+        changed_native_files = nat_it->second;
+    }
+    bool native_mode_switched = ctx.diff.mode_switched;
+    bool native_config_changed = ctx.diff.config_changed;
+    bool force_all = ctx.force_all;
+    fs::path src_dir = ctx.src_dir;
+    fs::path build_dir = ctx.build_dir;
+    std::vector<std::string> compile_architectures = ctx.compile_architectures;
+    RunFunc run_func = ctx.run_func;
+
+    // Launch Native Compilation (Clang/NDK) immediately in the background.
+    // Captured by value: the worker holds NO references to ctx or the mutable ctx.diff container.
     NativeStage native_stage;
-    auto native_future = std::async(std::launch::async, [&]() -> Result<void> {
-        return native_stage.execute(config, ctx);
-    });
+    auto native_future = std::async(
+        std::launch::async,
+        [native_stage, &config, src_dir, build_dir, compile_architectures, run_func,
+         changed_native_files = std::move(changed_native_files),
+         mode_switched = native_mode_switched,
+         config_changed = native_config_changed,
+         force_all]() mutable -> Result<void> {
+            return native_stage.execute(
+                config,
+                src_dir,
+                build_dir,
+                compile_architectures,
+                run_func,
+                std::move(changed_native_files),
+                mode_switched,
+                config_changed,
+                force_all
+            );
+        }
+    );
 
     // Run Dependency Stage (Aether Resolver, AAR Extraction, Manifest Merger)
     DependencyStage dep_stage;

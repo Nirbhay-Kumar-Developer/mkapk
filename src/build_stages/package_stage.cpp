@@ -104,6 +104,37 @@ Result<void> PackageStage::execute(const MkapkConfig& config, PipelineContext& c
         ks_info = ks_res.get_value();
     }
 
+    // Auto-resolve system or prebuilt dependency libraries into target ABI directories.
+    // Executed here so DependencyStage has finished unpacking AARs and dependencies.txt is complete.
+    if (!config.system_shared_libs.empty() || !config.dependencies.empty() || ctx.diff.config_changed || ctx.force_all) {
+        UI::stage(UI::Msg::STAGE_NDK_LIBS, UI::Msg::OP_RESOLVING_LIBS);
+        auto_place_system_libraries(config, ctx.build_dir, ctx.compile_architectures);
+    }
+
+    // --- PRE-PACKAGE NATIVE BINARY STRIP (RELEASE BUILDS) ---
+    // Strip all .so files once sequentially before spawning parallel packaging workers.
+    // Eliminates concurrent in-place file mutation races and ensures cross-ABI binaries strip cleanly.
+    if (ctx.is_release) {
+        fs::path lib_dir = ctx.build_dir / "lib";
+        if (fs::exists(lib_dir)) {
+            std::string strip_tool;
+            if (!config.ndk_bin.empty() && fs::exists(MkapkEnv::resolve_path(config.ndk_bin) / "llvm-strip")) {
+                strip_tool = (MkapkEnv::resolve_path(config.ndk_bin) / "llvm-strip").string();
+            } else {
+                strip_tool = MkapkEnv::get_tool_path("llvm-strip", config);
+                if (!fs::exists(strip_tool)) {
+                    strip_tool = MkapkEnv::get_tool_path("strip", config);
+                }
+            }
+
+            for (const auto& entry : fs::recursive_directory_iterator(lib_dir)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".so") {
+                    MkapkEnv::run_system_cmd({strip_tool, "--strip-unneeded", fs::absolute(entry.path()).string()});
+                }
+            }
+        }
+    }
+
     std::string profile_suffix = ctx.is_release ? ".release" : ".debug";
     struct PackTaskConfig { std::string filename_suffix; std::vector<std::string> target_abis; };
     std::vector<PackTaskConfig> package_matrix;
