@@ -38,6 +38,9 @@ if MAVEN_THIRD_PARTY.exists():
         if s and not s.lower().startswith("lists of "):
             maven_lines.append(s)
 
+# Extra bundled tool dependency to append
+andresguard_entry = "(Apache License, Version 2.0) AndResGuard CLI (com.tencent.mm.resourceproguard.cli-1.2.15 - https://github.com/shwenzhang/AndResGuard/)"
+
 
 # 2. ASSEMBLE DEP-5 DEBIAN COPYRIGHT FILE BY APPENDING TEXT SECTIONS
 sections = []
@@ -59,13 +62,21 @@ if MAIN_LICENSE.exists():
 for name, content in third_party_licenses.items():
     sections.append(f"License: {name}\n{format_indented(content)}")
 
+# Append Maven and extra runtime tool dependency notices
 if maven_lines:
     maven_formatted = "\n".join(f"  {ml}" for ml in maven_lines)
     sections.append(f"""Files: data/data/com.termux/files/usr/share/mkapk/lib/*
 Copyright: Various upstream authors
 License: Listed below
 Comment:
-{maven_formatted}""")
+{maven_formatted}
+  {andresguard_entry}""")
+else:
+    sections.append(f"""Files: data/data/com.termux/files/usr/share/mkapk/tools/*
+Copyright: Tencent / WeChat Teams & shwenzhang
+License: Apache-2.0
+Comment:
+  {andresguard_entry}""")
 
 TARGET_COPYRIGHT.write_text("\n\n".join(sections) + "\n")
 print(f">> [COPYRIGHT] Generated DEP-5 copyright at: {TARGET_COPYRIGHT}")
