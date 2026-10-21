@@ -2,6 +2,7 @@ package com.mkapk.tools;
 
 import java.io.File;
 import java.io.PrintStream;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -49,6 +50,8 @@ public class SimpleToolHandler implements ToolHandler {
                     Thread.currentThread().setContextClassLoader(targetLoader);
                     try {
                         mainMethod.invoke(null, (Object) args);
+                    } catch (InvocationTargetException e) {
+                        return handleInvocationTargetException(e);
                     } finally {
                         Thread.currentThread().setContextClassLoader(previousContextLoader);
                     }
@@ -56,7 +59,11 @@ public class SimpleToolHandler implements ToolHandler {
             } else {
                 Class<?> clazz = Class.forName(mainClassName);
                 Method mainMethod = clazz.getMethod("main", String[].class);
-                mainMethod.invoke(null, (Object) args);
+                try {
+                    mainMethod.invoke(null, (Object) args);
+                } catch (InvocationTargetException e) {
+                    return handleInvocationTargetException(e);
+                }
             }
 
             return true;
@@ -64,5 +71,29 @@ public class SimpleToolHandler implements ToolHandler {
             System.setOut(originalOut);
             System.setErr(originalErr);
         }
+    }
+
+    /**
+     * Unwraps nested reflection exceptions to intercept System.exit status codes.
+     */
+    private boolean handleInvocationTargetException(InvocationTargetException e) throws Exception {
+        Throwable target = e;
+        while (target instanceof InvocationTargetException) {
+            target = ((InvocationTargetException) target).getTargetException();
+        }
+
+        if (target instanceof MkapkTools.ExitInterceptedException exitEx) {
+            return exitEx.status == 0;
+        }
+
+        if (target instanceof Exception ex) {
+            throw ex;
+        }
+
+        if (target instanceof Error err) {
+            throw err;
+        }
+
+        throw new RuntimeException(target);
     }
 }
