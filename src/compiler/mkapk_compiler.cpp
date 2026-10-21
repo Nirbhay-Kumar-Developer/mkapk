@@ -23,19 +23,80 @@ void cleanup_stale_assets(const std::map<std::string, std::vector<fs::path>>& de
     for (auto const& [lang, files] : deleted_files) {
         for (const auto& rel_path : files) {
             std::string base_name = rel_path.stem().string();
-            fs::path parent_dir = java_out / rel_path.parent_path();
 
+            // Strip any nested/inner class marker if present in the base stem
+            size_t dollar_pos = base_name.find('$');
+            if (dollar_pos != std::string::npos) {
+                base_name = base_name.substr(0, dollar_pos);
+            }
+
+            // Canonicalize stem to associate Foo and FooKt under the same root
+            std::string canonical_base = base_name;
+            if (canonical_base.size() > 2 && canonical_base.rfind("Kt") == canonical_base.size() - 2) {
+                canonical_base = canonical_base.substr(0, canonical_base.size() - 2);
+            }
+
+            std::string kt_name = base_name + "Kt";
+            std::string canonical_kt = canonical_base + "Kt";
+
+            // 1. Purge all related .class files (including Kotlin *Kt.class and inner/lambda classes)
+            fs::path parent_dir = java_out / rel_path.parent_path();
             if (fs::exists(parent_dir)) {
                 for (const auto& entry : fs::directory_iterator(parent_dir)) {
+                    if (!entry.is_regular_file()) continue;
+
                     std::string filename = entry.path().filename().string();
-                    if (filename == base_name + ".class" || filename.find(base_name + "$") == 0) {
-                        fs::remove(entry.path());
+                    bool is_stale_class = false;
+
+                    // Standard Java/Kotlin class and inner class matches
+                    if (filename == base_name + ".class" || filename.rfind(base_name + "$", 0) == 0) {
+                        is_stale_class = true;
+                    }
+                    // Kotlin top-level function class and inner/closure matches (FooKt.class, FooKt$*.class)
+                    else if (filename == kt_name + ".class" || filename.rfind(kt_name + "$", 0) == 0) {
+                        is_stale_class = true;
+                    }
+                    // Canonical base matches if rel_path was already a *Kt class
+                    else if (!canonical_base.empty() && canonical_base != base_name) {
+                        if (filename == canonical_base + ".class" || filename.rfind(canonical_base + "$", 0) == 0 ||
+                            filename == canonical_kt + ".class"   || filename.rfind(canonical_kt + "$", 0) == 0) {
+                            is_stale_class = true;
+                        }
+                    }
+
+                    if (is_stale_class) {
+                        std::error_code ec;
+                        fs::remove(entry.path(), ec);
                     }
                 }
             }
 
-            fs::path target_dex = (dex_cache / rel_path).replace_extension(".dex");
-            fs::remove(target_dex);
+            // 2. Purge corresponding .dex slices from dex_cache
+            fs::path target_dex_dir = dex_cache / rel_path.parent_path();
+            if (fs::exists(target_dex_dir)) {
+                for (const auto& entry : fs::directory_iterator(target_dex_dir)) {
+                    if (!entry.is_regular_file() || entry.path().extension() != ".dex") continue;
+
+                    std::string stem = entry.path().stem().string();
+                    bool is_stale_dex = false;
+
+                    // Matches: base_name.dex, base_name_1.dex, base_nameKt.dex, base_nameKt_1.dex
+                    if (stem == base_name || stem.rfind(base_name + "_", 0) == 0 ||
+                        stem == kt_name   || stem.rfind(kt_name + "_", 0) == 0) {
+                        is_stale_dex = true;
+                    } else if (!canonical_base.empty() && canonical_base != base_name) {
+                        if (stem == canonical_base || stem.rfind(canonical_base + "_", 0) == 0 ||
+                            stem == canonical_kt   || stem.rfind(canonical_kt + "_", 0) == 0) {
+                            is_stale_dex = true;
+                        }
+                    }
+
+                    if (is_stale_dex) {
+                        std::error_code ec;
+                        fs::remove(entry.path(), ec);
+                    }
+                }
+            }
         }
     }
 }

@@ -47,9 +47,12 @@ Result<void> run_incremental_dex(
     const fs::path& dex_cache,
     const std::vector<fs::path>& files_to_dex,
     const std::vector<fs::path>& extra_jvm_classpaths,
-    RunFunc run)
+    RunFunc run,
+    const std::string& min_sdk)
 {
     if (files_to_dex.empty()) return Result<void>::success();
+
+    std::string min_api_val = min_sdk.empty() ? "21" : min_sdk;
 
     fs::path abs_src_path = fs::absolute(src_path);
     fs::path abs_java_out = fs::absolute(java_out);
@@ -82,10 +85,37 @@ Result<void> run_incremental_dex(
             base_name = base_name.substr(0, dollar_pos);
         }
 
-        std::string family_key = (rel_path.parent_path() / base_name).string();
+        // Canonicalize base name so Foo and FooKt share the same family key
+        std::string canonical_base = base_name;
+        if (canonical_base.size() > 2 && canonical_base.rfind("Kt") == canonical_base.size() - 2) {
+            canonical_base = canonical_base.substr(0, canonical_base.size() - 2);
+        }
+
+        std::string family_key = (rel_path.parent_path() / canonical_base).string();
 
         // Recognize R/Manifest classes even when passed as .class paths from java_out
         bool is_gen_family = is_gen || fs::exists(abs_gen_path / rel_path.parent_path() / (base_name + ".java"));
+
+        // Helper to match classes belonging to this family (including Kotlin *Kt classes)
+        auto is_member_of_family = [&](const std::string& filename) {
+            if (filename == base_name + ".class" || filename.rfind(base_name + "$", 0) == 0) {
+                return true;
+            }
+            std::string kt_name = base_name + "Kt";
+            if (filename == kt_name + ".class" || filename.rfind(kt_name + "$", 0) == 0) {
+                return true;
+            }
+            if (!canonical_base.empty() && canonical_base != base_name) {
+                if (filename == canonical_base + ".class" || filename.rfind(canonical_base + "$", 0) == 0) {
+                    return true;
+                }
+                std::string c_kt = canonical_base + "Kt";
+                if (filename == c_kt + ".class" || filename.rfind(c_kt + "$", 0) == 0) {
+                    return true;
+                }
+            }
+            return false;
+        };
 
         // Collect generated R.java / Manifest.java classes for a single batched D8 pass
         if (is_gen_family) {
@@ -93,7 +123,7 @@ Result<void> run_incremental_dex(
             if (fs::exists(class_dir)) {
                 for (const auto& entry : fs::directory_iterator(class_dir)) {
                     std::string filename = entry.path().filename().string();
-                    if (filename == base_name + ".class" || filename.rfind(base_name + "$", 0) == 0) {
+                    if (is_member_of_family(filename)) {
                         batched_gen_classes.push_back(fs::absolute(entry.path()).string());
                     }
                 }
@@ -107,7 +137,7 @@ Result<void> run_incremental_dex(
         if (fs::exists(class_dir)) {
             for (const auto& entry : fs::directory_iterator(class_dir)) {
                 std::string filename = entry.path().filename().string();
-                if (filename == base_name + ".class" || filename.rfind(base_name + "$", 0) == 0) {
+                if (is_member_of_family(filename)) {
                     family_classes.push_back(fs::absolute(entry.path()).string());
                 }
             }
@@ -117,10 +147,18 @@ Result<void> run_incremental_dex(
             fs::path target_dex_dir = dex_cache / rel_path.parent_path();
             fs::create_directories(target_dex_dir);
 
+            // Clean up old DEX files for both base_name and base_nameKt
             for (const auto& entry : fs::directory_iterator(target_dex_dir)) {
                 if (entry.is_regular_file() && entry.path().extension() == ".dex") {
                     std::string stem = entry.path().stem().string();
-                    if (stem == base_name || stem.rfind(base_name + "_", 0) == 0) {
+                    bool is_stale = (stem == base_name || stem.rfind(base_name + "_", 0) == 0 ||
+                                     stem == (base_name + "Kt") || stem.rfind(base_name + "Kt_", 0) == 0);
+                    if (!canonical_base.empty() && canonical_base != base_name) {
+                        if (stem == canonical_base || stem.rfind(canonical_base + "_", 0) == 0) {
+                            is_stale = true;
+                        }
+                    }
+                    if (is_stale) {
                         fs::remove(entry.path());
                     }
                 }
@@ -132,7 +170,7 @@ Result<void> run_incremental_dex(
 
             std::vector<std::string> d8_args = {
                 D8,
-                "--min-api", "21",
+                "--min-api", min_api_val,
                 "--lib", fs::absolute(android_jar).string(),
                 "--classpath", abs_java_out.string(),
                 "--output", fs::absolute(temp_dex_dir).string()
@@ -176,8 +214,11 @@ Result<void> run_incremental_dex(
         }
     }
 
-    // Batch-compile all generated R.class and R$*.class files in a single D8 call
+    // Batch-compile all generated R.class and Manifest.class files in a single D8 call
     if (!batched_gen_classes.empty()) {
+        std::sort(batched_gen_classes.begin(), batched_gen_classes.end());
+        batched_gen_classes.erase(std::unique(batched_gen_classes.begin(), batched_gen_classes.end()), batched_gen_classes.end());
+
         fs::path temp_gen_dir = dex_cache / "_tmp_gen_r";
         if (fs::exists(temp_gen_dir)) fs::remove_all(temp_gen_dir);
         fs::create_directories(temp_gen_dir);
@@ -191,7 +232,7 @@ Result<void> run_incremental_dex(
 
         std::vector<std::string> d8_gen_args = {
             D8,
-            "--min-api", "21",
+            "--min-api", min_api_val,
             "--lib", fs::absolute(android_jar).string(),
             "--output", fs::absolute(temp_gen_dir).string(),
             "@" + fs::absolute(gen_list_file).string()

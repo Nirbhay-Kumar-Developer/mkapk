@@ -171,7 +171,8 @@ Result<void> run_incremental_dex(
     const fs::path& dex_cache,
     const std::vector<fs::path>& files_to_dex,
     const std::vector<fs::path>& extra_jvm_classpaths,
-    RunFunc run
+    RunFunc run,
+    const std::string& min_sdk
 );
 
 // Packaging

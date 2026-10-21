@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <algorithm>
 #include "pipeline_stage.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_helpers.hpp"
@@ -76,13 +77,17 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
     // 4. Release Mode: R8 Whole-Program Optimization & Tree Shaking
     if (ctx.is_release) {
         UI::stage(UI::Msg::STAGE_MINIFY, UI::Msg::OP_R8_OPTIMIZE);
+
+        // Dynamically wire -no-obs from raw invocation arguments
+        bool no_obs = std::find(ctx.raw_args.begin(), ctx.raw_args.end(), "-no-obs") != ctx.raw_args.end();
+
         auto r8_res = run_dex_r8(
             ctx.tools["r8"],
             ctx.android_jar,
             config,
             ctx.build_dir,
             ctx.run_func,
-            false,
+            no_obs,
             extra_jvm_classpaths
         );
         if (r8_res.is_err()) return r8_res;
@@ -108,7 +113,7 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
             }
         }
 
-        // 5a. Incremental translation for modified application source classes
+        // 5a. Incremental translation for modified application source classes (using dynamic min_sdk)
         if (!unified_dex_targets.empty()) {
             auto d8_inc_res = run_incremental_dex(
                 ctx.tools["d8"],
@@ -118,7 +123,8 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
                 dex_cache,
                 unified_dex_targets,
                 extra_jvm_classpaths,
-                ctx.run_func
+                ctx.run_func,
+                config.min_sdk
             );
             if (d8_inc_res.is_err()) return d8_inc_res;
         }
