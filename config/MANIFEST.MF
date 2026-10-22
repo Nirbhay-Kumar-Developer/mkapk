@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Main-Class: com.mkapk.tools.MkapkTools
 Implementation-Title: mkapk internal daemon (private)
 Implementation-Vendor: Nirbhay Kumar
-Implementation-Version: v0.4.0-rc.1
+Implementation-Version: v0.4.0
 Built-By: Nirbhay Kumar
 Implementation-URL: https://github.com/Nirbhay-Kumar-Developer/mkapk
 Sealed: true

@@ -87,6 +87,11 @@ int main(int argc, char* argv[]) {
         std::cerr.rdbuf(old_cerr_buf);
         return 0;
     }
+    
+    if (args[0] == "-v" || args[0] == "--version") {
+        std::cout << "mkapk v0.4.0" << std::endl;
+        return 0;
+    }
 
     std::string command = args[0];
 

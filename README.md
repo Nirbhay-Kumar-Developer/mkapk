@@ -31,15 +31,11 @@ Before compiling or running `mkapk`, you need to ensure the required native buil
 * `kotlin`
 
 ### One-Line Installation
-Run the following command inside Termux to install all dependencies at once:
+Run the following command inside Termux to install all dependencies, mkapk and Android SDK at once:
 
 ```bash
-apt update && apt install openjdk-21 ndk-multilib aapt2 clang binutils libzip openssl apksigner -y
+curl -fsSL https://raw.githubusercontent.com/Nirbhay-Kumar-Developer/mkapk/main/install.sh | bash
 ```
-
-## Debian package download
-<a href="https://github.com/Nirbhay-Kumar-Developer/mkapk/releases/latest/download/mkapk-aarch64.deb">Download Latest Release</a>
-
 
 ---
 
