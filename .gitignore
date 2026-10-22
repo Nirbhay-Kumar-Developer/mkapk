@@ -7,3 +7,4 @@ mkapk-aarch64.deb
 config/target
 
 mkapk-aarch64/data/data/com.termux/files/usr/share/doc/mkapk/copyright
+THIRD-PARTY-LICENSES/
