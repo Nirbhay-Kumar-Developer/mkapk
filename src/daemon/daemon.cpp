@@ -4,51 +4,103 @@
 #include <cerrno>
 #include <chrono>
 #include <string>
+#include <vector>
+#include <mutex>
 #include <sys/wait.h>
 #include <sys/prctl.h>
 #include <csignal>
 #include <nlohmann/json.hpp>
+#include "mkapk_ipc.hpp"
 #include "mkapk_ui.hpp"
 #include "mkapk_result.hpp"
 #include "mkapk_log_sanitizer.hpp"
 
 namespace IpcClient {
 
-static int pipe_to_jvm[2] = {-1, -1};   // C++ writes to JVM
-static int pipe_from_jvm[2] = {-1, -1}; // C++ reads from JVM
-static int pipe_err_from_jvm[2] = {-1, -1};
+// Master synchronization lock protecting all pipe I/O, daemon PID, and sanitizer state
+static std::mutex g_ipc_mutex;
+
+static int pipe_to_jvm[2] = {-1, -1};       // C++ writes to JVM
+static int pipe_from_jvm[2] = {-1, -1};     // C++ reads from JVM
+static int pipe_err_from_jvm[2] = {-1, -1}; // C++ reads JVM stderr
 static pid_t daemon_pid = -1;
 
+// Thread-local copy ensures concurrent callers never clobber or race on output logs
+static thread_local std::vector<std::string> t_last_daemon_output;
+// Protected by g_ipc_mutex as a fallback if queried from a different thread
 static std::vector<std::string> g_last_daemon_output;
-static LogSanitizer daemon_logger; // Global sanitizer instance
+static LogSanitizer daemon_logger;
+
+static void close_fd_safe(int& fd) {
+    if (fd != -1) {
+        close(fd);
+        fd = -1;
+    }
+}
 
 /**
- * Returns the recorded stdout lines from the most recent call_java_tool execution.
+ * Returns a value copy of the recorded stdout lines from the most recent
+ * call_java_tool execution. Returning by value prevents data races if another
+ * thread invokes call_java_tool concurrently.
  */
-const std::vector<std::string>& get_last_daemon_output() {
+std::vector<std::string> get_last_daemon_output() {
+    if (!t_last_daemon_output.empty()) {
+        return t_last_daemon_output;
+    }
+    std::lock_guard<std::mutex> lock(g_ipc_mutex);
     return g_last_daemon_output;
 }
 
 Result<void> start_daemon(const std::string& classpath) {
+    std::lock_guard<std::mutex> lock(g_ipc_mutex);
+
+    // If daemon is already running and alive, return immediately
+    if (daemon_pid > 0) {
+        if (kill(daemon_pid, 0) == 0) {
+            return Result<void>::success();
+        }
+        // Reap dead process before restarting
+        waitpid(daemon_pid, nullptr, WNOHANG);
+        daemon_pid = -1;
+        close_fd_safe(pipe_to_jvm[1]);
+        close_fd_safe(pipe_from_jvm[0]);
+        close_fd_safe(pipe_err_from_jvm[0]);
+    }
+
     signal(SIGPIPE, SIG_IGN);
 
-    if (pipe(pipe_to_jvm) == -1 || pipe(pipe_from_jvm) == -1 || pipe(pipe_err_from_jvm) == -1) {
-        return Result<void>::error("System resource allocation failure: Failed to create IPC pipes.");
+    if (pipe(pipe_to_jvm) == -1) {
+        return Result<void>::error("System resource allocation failure: Failed to create stdin IPC pipe.");
+    }
+    if (pipe(pipe_from_jvm) == -1) {
+        close_fd_safe(pipe_to_jvm[0]);
+        close_fd_safe(pipe_to_jvm[1]);
+        return Result<void>::error("System resource allocation failure: Failed to create stdout IPC pipe.");
+    }
+    if (pipe(pipe_err_from_jvm) == -1) {
+        close_fd_safe(pipe_to_jvm[0]);
+        close_fd_safe(pipe_to_jvm[1]);
+        close_fd_safe(pipe_from_jvm[0]);
+        close_fd_safe(pipe_from_jvm[1]);
+        return Result<void>::error("System resource allocation failure: Failed to create stderr IPC pipe.");
     }
 
     daemon_pid = fork();
 
     if (daemon_pid == 0) { // Child Process: The JVM
-        // BUG FIX: Ensure the kernel kills the JVM if the C++ orchestrator terminates abruptly
+        // Ensure the kernel kills the JVM if the C++ orchestrator terminates abruptly
         prctl(PR_SET_PDEATHSIG, SIGKILL);
 
         dup2(pipe_to_jvm[0], STDIN_FILENO);
         dup2(pipe_from_jvm[1], STDOUT_FILENO);
         dup2(pipe_err_from_jvm[1], STDERR_FILENO);
 
+        close(pipe_to_jvm[0]);
         close(pipe_to_jvm[1]);
         close(pipe_from_jvm[0]);
+        close(pipe_from_jvm[1]);
         close(pipe_err_from_jvm[0]);
+        close(pipe_err_from_jvm[1]);
 
         execlp("java", "java",
                "-Djava.security.manager=allow",
@@ -59,9 +111,9 @@ Result<void> start_daemon(const std::string& classpath) {
         _exit(127);
     }
     else if (daemon_pid > 0) { // Parent Process: mkapk Native
-        close(pipe_to_jvm[0]);
-        close(pipe_from_jvm[1]);
-        close(pipe_err_from_jvm[1]);
+        close_fd_safe(pipe_to_jvm[0]);
+        close_fd_safe(pipe_from_jvm[1]);
+        close_fd_safe(pipe_err_from_jvm[1]);
 
         auto set_cloexec = [](int fd) {
             int flags = fcntl(fd, F_GETFD);
@@ -77,13 +129,13 @@ Result<void> start_daemon(const std::string& classpath) {
                 waitpid(daemon_pid, nullptr, 0);
                 daemon_pid = -1;
             }
-            if (pipe_to_jvm[1] != -1) { close(pipe_to_jvm[1]); pipe_to_jvm[1] = -1; }
-            if (pipe_from_jvm[0] != -1) { close(pipe_from_jvm[0]); pipe_from_jvm[0] = -1; }
-            if (pipe_err_from_jvm[0] != -1) { close(pipe_err_from_jvm[0]); pipe_err_from_jvm[0] = -1; }
+            close_fd_safe(pipe_to_jvm[1]);
+            close_fd_safe(pipe_from_jvm[0]);
+            close_fd_safe(pipe_err_from_jvm[0]);
             return Result<void>::error(err_msg);
         };
 
-        // JSON Refactor: Build and dispatch structured startup payload
+        // Build and dispatch structured startup payload
         nlohmann::json boot_msg;
         boot_msg["command"] = "START_DAEMON";
         std::string start_cmd = boot_msg.dump() + "\n";
@@ -183,15 +235,22 @@ Result<void> start_daemon(const std::string& classpath) {
         daemon_logger.flush();
 
     } else {
-        return Result<void>::error("Fatal error");
+        close_fd_safe(pipe_to_jvm[0]);
+        close_fd_safe(pipe_to_jvm[1]);
+        close_fd_safe(pipe_from_jvm[0]);
+        close_fd_safe(pipe_from_jvm[1]);
+        close_fd_safe(pipe_err_from_jvm[0]);
+        close_fd_safe(pipe_err_from_jvm[1]);
+        return Result<void>::error("Fatal error: fork() failed.");
     }
 
     return Result<void>::success();
 }
 
 void stop_daemon() {
+    std::lock_guard<std::mutex> lock(g_ipc_mutex);
+
     if (daemon_pid > 0) {
-        // JSON Refactor: Build and dispatch structured teardown payload
         nlohmann::json stop_msg;
         stop_msg["command"] = "STOP_DAEMON";
         std::string stop_cmd = stop_msg.dump() + "\n";
@@ -206,26 +265,30 @@ void stop_daemon() {
             total_written += bytes_written;
         }
 
-        close(pipe_to_jvm[1]);
-        close(pipe_from_jvm[0]);
-        if (pipe_err_from_jvm[0] != -1) close(pipe_err_from_jvm[0]);
+        close_fd_safe(pipe_to_jvm[1]);
+        close_fd_safe(pipe_from_jvm[0]);
+        close_fd_safe(pipe_err_from_jvm[0]);
 
         int status;
-        waitpid(daemon_pid, &status, 0);
+        while (waitpid(daemon_pid, &status, 0) == -1 && errno == EINTR) {}
         daemon_pid = -1;
     }
 }
 
 Result<void> call_java_tool(const std::vector<std::string>& args) {
+    t_last_daemon_output.clear();
+
+    std::lock_guard<std::mutex> lock(g_ipc_mutex);
     g_last_daemon_output.clear();
 
-    if (daemon_pid <= 0) {
+    if (daemon_pid <= 0 || pipe_to_jvm[1] == -1 || pipe_from_jvm[0] == -1) {
         return Result<void>::error("Daemon connection tracking flag inactive: JVM execution thread terminated.");
     }
 
-    // JSON Refactor: Build and dispatch structured tool execution payload
+    const std::string tool_name = args.empty() ? "" : args[0];
+
     nlohmann::json payload;
-    payload["command"] = args.empty() ? "" : args[0];
+    payload["command"] = tool_name;
 
     std::vector<std::string> tool_args;
     if (args.size() > 1) {
@@ -272,6 +335,7 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
         if (fds[0].revents & POLLIN) {
             ssize_t n = read(fds[0].fd, buffer, sizeof(buffer) - 1);
             if (n <= 0) {
+                if (n < 0 && errno == EINTR) continue;
                 return Result<void>::error("IPC connection with mkapk java daemon is broken.");
             }
 
@@ -289,7 +353,6 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
 
                 if (line.empty()) continue;
 
-                // Attempt to parse the structured IPC response payload
                 try {
                     auto j = nlohmann::json::parse(line);
                     std::string type = j.value("type", "");
@@ -304,33 +367,31 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
                         std::string level = j.value("level", "INFO");
                         std::string message = j.value("message", "");
 
-                        // Map back to legacy log routing format expected by LogSanitizer
                         if (level == "ERROR") {
-                            g_last_daemon_output.push_back("[ERROR]|" + message);
-                            daemon_logger.process_stdout_line("[ERROR]|" + message, args[0]);
+                            std::string formatted = "[ERROR]|" + message;
+                            g_last_daemon_output.push_back(formatted);
+                            daemon_logger.process_stdout_line(formatted, tool_name);
                         } else if (level == "WARN") {
-                            g_last_daemon_output.push_back("[WARN]|" + message);
-                            daemon_logger.process_stdout_line("[WARN]|" + message, args[0]);
+                            std::string formatted = "[WARN]|" + message;
+                            g_last_daemon_output.push_back(formatted);
+                            daemon_logger.process_stdout_line(formatted, tool_name);
                         } else {
-                            // Only route to sanitizer if it contains meaningful data
                             g_last_daemon_output.push_back(message);
-                            daemon_logger.process_stdout_line(message, args[0]);
+                            daemon_logger.process_stdout_line(message, tool_name);
                         }
                     } else if (type == "DATA") {
-                        // Crucial for MkapkResolver: Retain the expected output prefix for dynamic resolution mapping
                         std::string payload_data = j.value("payload", "");
                         std::string legacy_data = "MKAPK_RESOLVED|" + payload_data;
                         g_last_daemon_output.push_back(legacy_data);
                     }
                 } catch (const nlohmann::json::parse_error&) {
-                    // Fail-safe: Route raw unparsed strings (e.g. JVM internal crash dumps) through normally
                     g_last_daemon_output.push_back(line);
-                    daemon_logger.process_stdout_line(line, args[0]);
+                    daemon_logger.process_stdout_line(line, tool_name);
                 }
             }
         }
         else if (fds[0].revents & (POLLERR | POLLHUP)) {
-             return Result<void>::error("IPC connection with mkapk java daemon disconnected.");
+            return Result<void>::error("IPC connection with mkapk java daemon disconnected.");
         }
 
         // CHANNEL 2: STANDARD ERROR (Passed straight into LogSanitizer for Jansi noise checks)
@@ -359,12 +420,16 @@ Result<void> call_java_tool(const std::vector<std::string>& args) {
     }
 
     daemon_logger.flush();
-    
+
+    // Snapshot output into thread-local storage before releasing g_ipc_mutex
+    t_last_daemon_output = g_last_daemon_output;
+
     if (task_failed) {
-        std::string tool = args.empty() ? "java_tool" : args[0];
+        std::string tool = tool_name.empty() ? "java_tool" : tool_name;
         return Result<void>::error(tool + " execution failed.");
     }
 
     return Result<void>::success();
 }
-}
+
+} // namespace IpcClient

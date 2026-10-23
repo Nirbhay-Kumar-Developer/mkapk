@@ -7,11 +7,11 @@
 #include "mkapk_result.hpp"
 
 namespace IpcClient {
-    
-    const std::vector<std::string>& get_last_daemon_output();
-    
     // Initializes the background JVM daemon.
     Result<void> start_daemon(const std::string& classpath);
+
+    // Returns a thread-safe value copy of the most recent daemon output lines
+    std::vector<std::string> get_last_daemon_output();
 
     /**
      * Gracefully tears down the background daemon.
