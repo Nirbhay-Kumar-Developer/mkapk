@@ -5,6 +5,7 @@
 #include <fstream>
 #include <system_error>
 #include <future>
+#include <algorithm>
 
 #include "mkapk_extractor.hpp"
 #include "mkapk_tools.hpp"
@@ -13,6 +14,18 @@
 namespace fs = std::filesystem;
 
 namespace MkapkExtractor {
+
+static bool is_within_root(const fs::path& root, const fs::path& target) {
+    fs::path canonical_root = fs::weakly_canonical(root);
+    fs::path canonical_target = fs::weakly_canonical(target);
+
+    auto [it_root, it_target] = std::mismatch(
+        canonical_root.begin(), canonical_root.end(),
+        canonical_target.begin(), canonical_target.end()
+    );
+
+    return (it_root == canonical_root.end());
+}
 
 static bool extract_zip_entry(zip_t* archive, zip_uint64_t index, const fs::path& dest_path) {
     zip_file_t* file = zip_fopen_index(archive, index, 0);
@@ -103,6 +116,14 @@ bool extract_aar(const std::string& aar_path) {
             entry_name.rfind("assets/", 0) == 0) {
 
             fs::path target_path = dest_dir / entry_name;
+
+            // Guard against Zip Slip path traversal
+            if (!is_within_root(dest_dir, target_path)) {
+                UI::error("Blocked Zip Slip traversal attempt in AAR", entry_name);
+                extraction_failed = true;
+                break;
+            }
+
             if (!extract_zip_entry(archive, i, target_path)) {
                 extraction_failed = true;
                 break;
