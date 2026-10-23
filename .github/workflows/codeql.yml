@@ -40,7 +40,16 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      # Integrated: Running advanced security and quality suites
+      - name: Install C/C++ Build Dependencies
+        if: matrix.language == 'c-cpp'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libzip-dev \
+            libssl-dev \
+            libxxhash-dev \
+            nlohmann-json3-dev
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
@@ -48,56 +57,25 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended,security-and-quality
 
-      # --- MANUAL BUILD FOR C/C++ ---
+      # --- DYNAMIC BUILD FOR C/C++ ---
       - name: Build C/C++ Core & Modules
         if: matrix.language == 'c-cpp'
         shell: bash
         run: |
-          sed -i 's/\r$//' compile.sh 2>/dev/null || true
-          echo "Attempting build via repository scripts..."
-          if [ -f ./compile.sh ] && bash compile.sh; then
-            echo "Build via compile.sh succeeded."
-          elif [ -f Makefile ] || [ -f makefile ] && make; then
-            echo "Build via Makefile succeeded."
-          else
-            echo "Standard build scripts failed or mismatched environment."
-            echo "Dropping to flat compiler fallback for CodeQL..."
-            mkdir -p bin
-            g++ -std=c++17 \
-                -Iinclude \
-                src/main.cpp \
-                src/mkapk_compiler.cpp \
-                src/mkapk_env.cpp \
-                src/mkapk_helper.cpp \
-                src/modules/build_pipeline.cpp \
-                src/modules/change_checker.cpp \
-                src/modules/daemon.cpp \
-                src/modules/plugins/plugin_manager.cpp \
-                src/modules/build_modules/dex.cpp \
-                src/modules/build_modules/finish.cpp \
-                src/modules/build_modules/java.cpp \
-                src/modules/build_modules/kotlin.cpp \
-                src/modules/build_modules/native.cpp \
-                src/modules/build_modules/res.cpp \
-                src/modules/dependency/extracter.cpp \
-                src/modules/dependency/manifest_merger.cpp \
-                src/modules/dependency/resolver.cpp \
-                -o mkapk_bin || {
-                  echo "Warning: Native header missing."
-                  echo "Compiling interfaces for CodeQL extraction..."
-                  g++ -std=c++17 -c -Iinclude \
-                      src/*.cpp \
-                      src/modules/*.cpp \
-                      src/modules/build_modules/*.cpp \
-                      src/modules/dependency/*.cpp \
-                      src/modules/plugins/*.cpp || true
-                }
+          set -euo pipefail
+          echo ">> Building C++ codebase via Makefile for CodeQL..."
+          LINK_FLAGS="-lcrypto -lssl -lzip -lpthread"
+          if ! make -j"$(nproc)" BUILD_MODE=release LDFLAGS="$LINK_FLAGS"; then
+            echo ">> Makefile failed. Falling back to dynamic discovery..."
+            mkdir -p build/obj
+            mapfile -t SRCS < <(find src -type f -name "*.cpp")
+            g++ -std=c++20 -O2 -I./include -I./src -c "${SRCS[@]}"
           fi
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:${{matrix.language}}"
+          category: "/language:${{ matrix.language }}"
 
   # --- AUTOMATED BUILD SCRIPT AND MAKEFILE LINTING ---
   lint:
@@ -125,7 +103,8 @@ jobs:
           SARIF_REPORTER: true
 
       - name: Upload MegaLinter Scan Results to GitHub Security Tab
-        if: success() || failure()
+        if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'megalinter-reports/megalinter-report.sarif'
+          category: "megalinter"
