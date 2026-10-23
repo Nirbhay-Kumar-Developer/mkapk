@@ -160,7 +160,8 @@ Result<void> run_dex_d8(
     const fs::path& android_jar,
     const fs::path& bin_dir,
     const fs::path& dex_cache,
-    RunFunc run_func
+    RunFunc run_func,
+    const std::string& min_sdk
 );
 
 Result<void> run_incremental_dex(

@@ -462,7 +462,8 @@ Result<void> run_dex_d8(
     const fs::path& android_jar,
     const fs::path& bin_dir,
     const fs::path& dex_cache,
-    RunFunc run_func)
+    RunFunc run_func,
+    const std::string& min_sdk)
 {
     fs::path bin_dir_path = fs::absolute(bin_dir);
     std::vector<std::string> inputs;
@@ -484,10 +485,12 @@ Result<void> run_dex_d8(
     if (inputs.empty()) {
         return Result<void>::error("No .dex or .class files found for D8. Check compiler output.");
     }
+    
+    std::string min_api_val = min_sdk.empty() ? "21" : min_sdk;
 
     std::vector<std::string> args = {
         D8_TOOL,
-        "--min-api", "21", // Automates Java 8+ language feature desugaring
+        "--min-api", min_api_val, // Automates Java 8+ language feature desugaring
         "--lib", fs::absolute(android_jar).string(),
         "--output", bin_dir_path.string()
     };

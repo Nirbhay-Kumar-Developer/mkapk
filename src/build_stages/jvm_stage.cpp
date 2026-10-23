@@ -191,8 +191,16 @@ Result<void> JvmStage::execute(const MkapkConfig& config, PipelineContext& ctx) 
         }
 
         // 5c. Merge all cached incremental app classes and dep_classes*.dex slices into final classes.dex
-        auto d8_merge_res = run_dex_d8(ctx.tools["d8"], ctx.android_jar, ctx.build_dir, dex_cache, ctx.run_func);
-        if (d8_merge_res.is_err()) return d8_merge_res;
+        auto d8_merge_res = run_dex_d8(
+        ctx.tools["d8"], 
+        ctx.android_jar, 
+        ctx.build_dir, 
+        dex_cache, 
+        ctx.run_func,
+        config.min_sdk);
+        
+        if (d8_merge_res.is_err()) 
+        return d8_merge_res;
     }
 
     return Result<void>::success();
