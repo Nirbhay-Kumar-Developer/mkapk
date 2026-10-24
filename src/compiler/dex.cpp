@@ -279,7 +279,6 @@ Result<void> run_incremental_dex(
  * - Exports mapping.txt for de-obfuscation
  * - Uses Arg-Files to prevent E2BIG overflow on large codebases
  */
-
 Result<void> run_dex_r8(
     const std::string& R8_TOOL,
     const fs::path& android_jar,
@@ -296,6 +295,13 @@ Result<void> run_dex_r8(
         return Result<void>::error(UI::Msg::FATAL_INTERNAL);
     }
 
+    // 1. Prepare temporary dex_cache output directory
+    fs::path temp_dex_cache = bin_dir_path / "dex_cache";
+    if (fs::exists(temp_dex_cache)) {
+        fs::remove_all(temp_dex_cache);
+    }
+    fs::create_directories(temp_dex_cache);
+
     const char* prefix_env = std::getenv("PREFIX");
     fs::path kotlin_lib_root = prefix_env ? fs::path(prefix_env) / "opt/kotlin/lib/"
                                           : "/data/data/com.termux/files/usr/opt/kotlin/lib/";
@@ -308,7 +314,7 @@ Result<void> run_dex_r8(
         "--release",
         "--min-api", min_api_val,
         "--lib", fs::absolute(android_jar).string(),
-        "--output", bin_dir_path.string()
+        "--output", temp_dex_cache.string()
     };
 
     if (fs::exists(annotations_jar)) {
@@ -316,104 +322,110 @@ Result<void> run_dex_r8(
         args.push_back(fs::absolute(annotations_jar).string());
     }
 
-    // Baseline fallback rules to suppress optional annotations and allow whole-program tree shaking
+    // 2. Baseline fallback rules + Optional -dontobfuscate directive
     fs::path baseline_rules = bin_dir_path / "mkapk_baseline_rules.pro";
     std::ofstream baseline_file(baseline_rules);
     if (baseline_file.is_open()) {
         baseline_file << "-dontwarn **\n";
         baseline_file << "-ignorewarnings\n";
+        if (no_obs) {
+            baseline_file << "-dontobfuscate\n";
+        }
         baseline_file.close();
         args.push_back("--pg-conf");
         args.push_back(baseline_rules.string());
     }
 
-    if (!no_obs) {
-        // 1. AAPT2 generated keep rules (manifest components, XML view references)
-        fs::path aapt_rules = bin_dir_path / "aapt_rules.pro";
-        if (fs::exists(aapt_rules)) {
-            args.push_back("--pg-conf");
-            args.push_back(fs::absolute(aapt_rules).string());
-        }
+    // 3. Keep rules (ALWAYS applied to preserve manifest entry points & reflection)
+    // AAPT2 generated rules (MainActivity, manifest components, XML view references)
+    fs::path aapt_rules = bin_dir_path / "aapt_rules.pro";
+    if (fs::exists(aapt_rules)) {
+        args.push_back("--pg-conf");
+        args.push_back(fs::absolute(aapt_rules).string());
+    }
 
-        // 2. Discover and forward all library consumer rules for active project dependencies
-        std::set<std::string> seen_rules;
-        std::vector<std::string> rule_filenames = {
-            "proguard.txt",
-            "consumer-rules.pro",
-            "proguard.pro"
-        };
+    // Discover and forward library consumer rules for active project dependencies
+    std::set<std::string> seen_rules;
+    std::vector<std::string> rule_filenames = {
+        "proguard.txt",
+        "consumer-rules.pro",
+        "proguard.pro"
+    };
 
-        // Path A: Inspect directories of supplied dependency JARs/AARs (<dependency_dir>/extracted_aar/)
-        for (const auto& jar : extra_dependency_jars) {
-            fs::path dir = jar.parent_path();
-            for (const auto& name : rule_filenames) {
-                fs::path candidate = dir / name;
-                if (fs::exists(candidate) && fs::file_size(candidate) > 0) {
-                    std::string abs_rule = fs::absolute(candidate).string();
-                    if (seen_rules.insert(abs_rule).second) {
-                        args.push_back("--pg-conf");
-                        args.push_back(abs_rule);
-                    }
+    for (const auto& jar : extra_dependency_jars) {
+        // Path A: Inspect directories of supplied dependency JARs/AARs
+        fs::path dir = jar.parent_path();
+        for (const auto& name : rule_filenames) {
+            fs::path candidate = dir / name;
+            if (fs::exists(candidate) && fs::file_size(candidate) > 0) {
+                std::string abs_rule = fs::absolute(candidate).string();
+                if (seen_rules.insert(abs_rule).second) {
+                    args.push_back("--pg-conf");
+                    args.push_back(abs_rule);
                 }
             }
+        }
 
-            // Path B: Extract embedded ProGuard rules from META-INF/proguard/ inside JAR files
-            if (fs::exists(jar) && jar.extension() == ".jar") {
-                int err = 0;
-                zip_t* archive = zip_open(jar.string().c_str(), 0, &err);
-                if (archive) {
-                    zip_int64_t num_entries = zip_get_num_entries(archive, 0);
-                    for (zip_int64_t i = 0; i < num_entries; ++i) {
-                        const char* entry_name = zip_get_name(archive, i, 0);
-                        if (!entry_name) continue;
+        // Path B: Extract embedded ProGuard rules from META-INF/proguard/ inside JAR files
+        if (fs::exists(jar) && jar.extension() == ".jar") {
+            int err = 0;
+            zip_t* archive = zip_open(jar.string().c_str(), 0, &err);
+            if (archive) {
+                zip_int64_t num_entries = zip_get_num_entries(archive, 0);
+                for (zip_int64_t i = 0; i < num_entries; ++i) {
+                    const char* entry_name = zip_get_name(archive, i, 0);
+                    if (!entry_name) continue;
 
-                        std::string entry_str(entry_name);
-                        if (entry_str.rfind("META-INF/proguard/", 0) == 0 && entry_str.back() != '/') {
-                            fs::path rule_dest_dir = bin_dir_path / "extracted_proguard_rules" / jar.stem();
-                            fs::create_directories(rule_dest_dir);
+                    std::string entry_str(entry_name);
+                    if (entry_str.rfind("META-INF/proguard/", 0) == 0 && entry_str.back() != '/') {
+                        // Namespace output directory to prevent collision across AAR "classes.jar" files
+                        std::string namespace_dir = jar.parent_path().filename().string() + "_" + jar.stem().string();
+                        fs::path rule_dest_dir = bin_dir_path / "extracted_proguard_rules" / namespace_dir;
+                        fs::create_directories(rule_dest_dir);
 
-                            fs::path out_rule_path = rule_dest_dir / fs::path(entry_str).filename();
-                            zip_file_t* zf = zip_fopen_index(archive, i, 0);
-                            if (zf) {
-                                std::ofstream out_f(out_rule_path, std::ios::binary);
-                                if (out_f.is_open()) {
-                                    char buf[4096];
-                                    zip_int64_t bytes = 0;
-                                    while ((bytes = zip_fread(zf, buf, sizeof(buf))) > 0) {
-                                        out_f.write(buf, bytes);
-                                    }
-                                    out_f.close();
+                        fs::path out_rule_path = rule_dest_dir / fs::path(entry_str).filename();
+                        zip_file_t* zf = zip_fopen_index(archive, i, 0);
+                        if (zf) {
+                            std::ofstream out_f(out_rule_path, std::ios::binary);
+                            if (out_f.is_open()) {
+                                char buf[4096];
+                                zip_int64_t bytes = 0;
+                                while ((bytes = zip_fread(zf, buf, sizeof(buf))) > 0) {
+                                    out_f.write(buf, bytes);
                                 }
-                                zip_fclose(zf);
+                                out_f.close();
+                            }
+                            zip_fclose(zf);
 
-                                if (fs::exists(out_rule_path) && fs::file_size(out_rule_path) > 0) {
-                                    std::string abs_rule = fs::absolute(out_rule_path).string();
-                                    if (seen_rules.insert(abs_rule).second) {
-                                        args.push_back("--pg-conf");
-                                        args.push_back(abs_rule);
-                                    }
+                            if (fs::exists(out_rule_path) && fs::file_size(out_rule_path) > 0) {
+                                std::string abs_rule = fs::absolute(out_rule_path).string();
+                                if (seen_rules.insert(abs_rule).second) {
+                                    args.push_back("--pg-conf");
+                                    args.push_back(abs_rule);
                                 }
                             }
                         }
                     }
-                    zip_close(archive);
                 }
+                zip_close(archive);
             }
         }
+    }
 
-        // 3. User-defined ProGuard rules
-        if (!config.proguard_rules.empty()) {
-            fs::path pg_rules = fs::absolute(MkapkEnv::resolve_path(config.proguard_rules));
-            if (fs::exists(pg_rules)) {
-                args.push_back("--pg-conf");
-                args.push_back(pg_rules.string());
-            } else if (fs::exists(fs::current_path() / config.proguard_rules)) {
-                args.push_back("--pg-conf");
-                args.push_back(fs::absolute(fs::current_path() / config.proguard_rules).string());
-            }
+    // User-defined ProGuard rules
+    if (!config.proguard_rules.empty()) {
+        fs::path pg_rules = fs::absolute(MkapkEnv::resolve_path(config.proguard_rules));
+        if (fs::exists(pg_rules)) {
+            args.push_back("--pg-conf");
+            args.push_back(pg_rules.string());
+        } else if (fs::exists(fs::current_path() / config.proguard_rules)) {
+            args.push_back("--pg-conf");
+            args.push_back(fs::absolute(fs::current_path() / config.proguard_rules).string());
         }
+    }
 
-        // 4. Obfuscation mapping output
+    // 4. Obfuscation mapping output (only generated when obfuscation is active)
+    if (!no_obs) {
         fs::path mapping_file = bin_dir_path / "mapping.txt";
         args.push_back("--pg-map-output");
         args.push_back(mapping_file.string());
@@ -448,8 +460,38 @@ Result<void> run_dex_r8(
         }
     }
 
+    // 6. Execute R8
     auto res = run_func(args, "R8 optimization failed");
-    if (res.is_err()) return res;
+    if (res.is_err()) {
+        if (fs::exists(temp_dex_cache)) {
+            fs::remove_all(temp_dex_cache);
+        }
+        return res;
+    }
+
+    // 7. Purge existing stale classes*.dex from destination directory
+    for (const auto& entry : fs::directory_iterator(bin_dir_path)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".dex") {
+            std::string stem = entry.path().stem().string();
+            if (stem == "classes" || stem.rfind("classes", 0) == 0) {
+                fs::remove(entry.path());
+            }
+        }
+    }
+
+    // 8. Move newly generated classes*.dex from dex_cache to bin_dir_path
+    if (fs::exists(temp_dex_cache)) {
+        for (const auto& entry : fs::directory_iterator(temp_dex_cache)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".dex") {
+                std::string fname = entry.path().filename().string();
+                if (fname.rfind("classes", 0) == 0) {
+                    fs::rename(entry.path(), bin_dir_path / fname);
+                }
+            }
+        }
+        // 9. Clean up temporary directory
+        fs::remove_all(temp_dex_cache);
+    }
 
     return Result<void>::success();
 }
