@@ -34,7 +34,11 @@ Before compiling or running `mkapk`, you need to ensure the required native buil
 Run the following command inside Termux to install all dependencies, mkapk and Android SDK at once:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Nirbhay-Kumar-Developer/mkapk/main/install.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Nirbhay-Kumar-Developer/mkapk/main/install.sh)
+```
+If you want to compile from source (Recommended), run this:
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Nirbhay-Kumar-Developer/mkapk/main/install.sh) --compile
 ```
 
 ---
