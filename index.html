@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="A liteweight Android Build System for Termux supporting Java, Kotlin, C and C++ and more languages through plugins.">
-    <title>mkapk - Lightweight Android Build System for Termux</title>
+    <title>mkapk - Android Build System for Termux</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/responsive.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -70,13 +70,13 @@ $ mkapk build -ndk-all</code></pre>
             <div class="features-grid">
                 <div class="feature-card">
                     <i class="fas fa-tachometer-alt"></i>
-                    <h3>Ultra-Fast</h3>
+                    <h3>Fast</h3>
                     <p>Incremental builds detect changes instantly with xxHash3. Skip unnecessary recompilation.</p>
                 </div>
                 <div class="feature-card">
                     <i class="fas fa-shield-alt"></i>
                     <h3>Secure</h3>
-                    <p>Cryptographically signed plugins, zero-trust verification, and automatic dependency resolution.</p>
+                    <p>Cryptographically signed plugins and automatic dependency resolution.</p>
                 </div>
                 <div class="feature-card">
                     <i class="fas fa-code"></i>
@@ -95,8 +95,8 @@ $ mkapk build -ndk-all</code></pre>
                 </div>
                 <div class="feature-card">
                     <i class="fas fa-laptop"></i>
-                    <h3>Lightweight</h3>
-                    <p>Minimal dependencies, optimized for Termux environment. Run directly on your device.</p>
+                    <h3>Dependency Resolution</h3>
+                    <p>Now, mkapk handles auto-resolution of dependencies declared in config.json and their transitive dependencies via Maven Artifact Resolver.</p>
                 </div>
             </div>
         </div>
@@ -107,15 +107,15 @@ $ mkapk build -ndk-all</code></pre>
         <div class="container">
             <div class="info-grid">
                 <div class="info-item">
-                    <h3>87.6%</h3>
+                    <h3>74.6%</h3>
                     <p>C++ Core</p>
                 </div>
                 <div class="info-item">
-                    <h3>7.8%</h3>
-                    <p>Java/JVM</p>
+                    <h3>19%</h3>
+                    <p>Java</p>
                 </div>
                 <div class="info-item">
-                    <h3>~730kbs</h3>
+                    <h3>~5MB</h3>
                     <p>Binary Size</p>
                 </div>
                 <div class="info-item">
