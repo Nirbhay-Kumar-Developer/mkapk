@@ -27,12 +27,10 @@
                         <a href="quickstart.html">Quick Start</a>
                         <a href="configuration.html">Configuration</a>
                         <a href="usage-guide.html">Usage Guide</a>
-                        
                     </div>
                 </li>
                 <li><a href="faq.html">FAQ</a></li>
                 <li><a href="troubleshooting.html">Troubleshooting</a></li>
-                
                 <li><a href="https://github.com/Nirbhay-Kumar-Developer/mkapk" target="_blank"><i class="fab fa-github"></i> GitHub</a></li>
             </ul>
             <div class="hamburger" id="hamburger">
@@ -57,105 +55,36 @@
             <li><a href="../index.html">Home</a></li>
             <li>Installation</li>
         </ul>
-
-        <h2>Prerequisites</h2>
-        <p>Before installing mkapk, ensure your Termux environment has the following packages:</p>
-
-        <div class="alert alert-info">
-            <strong>Note:</strong> These are required for mkapk to function properly. Install them before proceeding.
-        </div>
-
-        <h3>Required Packages</h3>
-        <ul>
-            <li><strong>openjdk-21</strong> - Java Development Kit (JVM runtime)</li>
-            <li><strong>ndk-multilib</strong> - Android NDK with multiple architectures</li>
-            <li><strong>aapt2</strong> - Android Asset Packaging Tool 2</li>
-            <li><strong>apksigner</strong> - APK signing utility</li>
-            <li><strong>clang</strong> - C/C++ compiler from LLVM</li>
-            <li><strong>binutils</strong> - GNU binary utilities (includes strip)</li>
-            <li><strong>libzip</strong> - Library for working with ZIP archives</li>
-            <li><strong>openssl</strong> - Cryptography library</li>
-            <li><strong>wget</strong> - File downloader utility</li>
-            <li><strong>kotlin</strong> - Support for Kotlin language</li>
-        </ul>
-
-        <h2>Installation Steps</h2>
-
-        <h3>Step 1: Dependencies</h3>
-        <p>Open Termux and run the following command to install all dependencies and mkapk:</p>
-
-        <div class="stepper">
-            <div class="step">
-                <div class="step-number">1</div>
-                <div class="step-content">            
-                    <div class="command-box">
-                        <span class="prompt">$</span> apt update && apt install openjdk-21 ndk-multilib aapt2 clang binutils libzip openssl apksigner wget kotlin -y
-                    </div>
-                </div>
-            </div>
-
-        <div class="alert alert-success">
-            <strong>Success!</strong> All dependencies are now installed. Proceed to download mkapk.
-        </div>
-
-        <h3>Step 2: Download Debian Package</h3>
-        <p>Download the pre-compiled Debian package:</p>
-
-        <div class="stepper">
-            <div class="step">
-                <div class="step-number">2</div>
-                <div class="step-content">                                     
-                    <div class="command-box">
-                        <span class="prompt">$</span> wget https://github.com/Nirbhay-Kumar-Developer/mkapk/releases/latest/download/mkapk-aarch64.deb
-                    </div>
-                </div>
-            </div>
-            
-        <h3>Step 3: Install the package:</h3>       
-
-        <div class="stepper">
-            <div class="step">
-                <div class="step-number">3</div>
-                <div class="step-content">                   
-                    <div class="command-box">
-                        <span class="prompt">$</span> dpkg --install ./mkapk-aarch64.deb
-                    </div>
-                </div>
-            </div>
-
-        <h2>Method 2: Compile from Source</h2>
-        <p>For advanced users who want to compile mkapk from source:</p>
-
-        <div class="stepper">
-            <div class="step">
-                <div class="step-number">1</div>
-                <div class="step-content">
-                    <h4>Clone the Repository</h4>
-                    <div class="command-box">
-                        <span class="prompt">$</span> git clone https://github.com/Nirbhay-Kumar-Developer/mkapk.git<br>
-                        <span class="prompt">$</span> cd mkapk
-                    </div>
-                </div>
-            </div>
-
-            <div class="step">
-                <div class="step-number">2</div>
-                <div class="step-content">
-                    <h4>Build the Project</h4>
-                    <div class="command-box">
-                        <span class="prompt">$</span> bash compile.sh && dpkg --install mkapk-aarch64.deb        
-                    </div>
-                </div>
-            </div>   
-
-        <h2>Verify Installation</h2>
-        <p>Check if mkapk was installed correctly:</p>
+        
+        <p>The easiest way to install mkapk is using our automated installation script. We recommend compiling from source to ensure native compatibility with your architecture.</p>
+        
+        <h2>Method 1: Compile from Source (Recommended)</h2>
+        
+        <p>Run the installer with the <code>--compile</code> flag to automatically install all build-time toolchain dependencies (maven, make, git, python), clone the repository, compile from source, and install the package:</p>
 
         <div class="command-box">
-            <span class="prompt">$</span> mkapk --help
+            bash &lt;(curl -fsSL https://raw.githubusercontent.com/Nirbhay-Kumar-Developer/mkapk/main/install.sh) --compile
         </div>
 
-        <p>You should see the help menu with all available commands. If this works, mkapk is successfully installed!</p>
+        <h2>Method 2: Install Pre-built Package</h2>
+        <p>If you prefer to install using the pre-compiled aarch64 Debian package directly:</p>
+
+        <div class="command-box">
+            bash &lt;(curl -fsSL https://raw.githubusercontent.com/Nirbhay-Kumar-Developer/mkapk/main/install.sh)
+        </div>
+
+        <h2>Verify Installation</h2>
+        <p>Check if mkapk was installed correctly and verify its version:</p>
+
+        <div class="command-box">
+            mkapk --version
+        </div>
+
+        <p>You can also view all available commands:</p>
+
+        <div class="command-box">
+            mkapk --help
+        </div>
 
         <div class="alert alert-success">
             <strong>Installation Complete!</strong> You can now proceed to the <a href="quickstart.html">Quick Start Guide</a>.
@@ -164,22 +93,15 @@
         <h2>Troubleshooting Installation</h2>
 
         <h3>Issue: "mkapk: command not found"</h3>
-        <p>The binary may not be in your PATH. Try:</p>
+        <p>The binary may not be in your PATH. Try verifying with:</p>
         <div class="command-box">
-            <span class="prompt">$</span> which mkapk
+            which mkapk
         </div>
-        <p>If it returns nothing, reinstall the package or add the installation directory to your PATH.</p>
 
         <h3>Issue: "Permission denied"</h3>
         <p>Ensure the binary has execute permissions:</p>
         <div class="command-box">
-            <span class="prompt">$</span> chmod +x $PREFIX/bin/mkapk
-        </div>
-
-        <h3>Issue: Missing Dependencies</h3>
-        <p>Run the prerequisite installation again:</p>
-        <div class="command-box">
-            <span class="prompt">$</span> apt install -y openjdk-21 ndk-multilib aapt2 clang binutils libzip openssl apksigner
+            chmod +x $PREFIX/bin/mkapk
         </div>
 
         <h2>Next Steps</h2>
