@@ -98,35 +98,42 @@ window.addEventListener('scroll', updateActiveNav);
 
 // Copy to clipboard functionality
 function setupCopyButtons() {
-    const codeBlocks = document.querySelectorAll('.code-block pre, .command-box');
-    codeBlocks.forEach(block => {
+    const containers = document.querySelectorAll('.code-block, .command-box');
+    containers.forEach(container => {
+        const textSource = container.classList.contains('code-block') ? (container.querySelector('pre') || container) : container;
+        
+        container.style.position = 'relative';
+
         const button = document.createElement('button');
         button.className = 'copy-btn';
-        button.innerHTML = '<i class="fas fa-copy"></i> Copy';
+        button.innerHTML = '<i class="fas fa-copy"></i>';
         button.style.cssText = `
             position: absolute;
             top: 10px;
             right: 10px;
-            padding: 0.5rem 1rem;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             background: var(--primary-color);
             color: #fff;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
-            font-size: 0.9rem;
-            font-weight: 600;
+            font-size: 1rem;
+            transition: var(--transition);
+            z-index: 10;
         `;
 
-        block.parentElement.style.position = 'relative';
-        block.parentElement.appendChild(button);
+        container.appendChild(button);
 
         button.addEventListener('click', () => {
-            const text = block.textContent;
+            const text = textSource.textContent;
             navigator.clipboard.writeText(text).then(() => {
-                const originalText = button.innerHTML;
-                button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                button.innerHTML = '<i class="fas fa-check"></i>';
                 setTimeout(() => {
-                    button.innerHTML = originalText;
+                    button.innerHTML = '<i class="fas fa-copy"></i>';
                 }, 2000);
             });
         });
