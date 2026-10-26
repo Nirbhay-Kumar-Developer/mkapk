@@ -1,9 +1,10 @@
 build/
-test/bin/
-bundle.sh
-bundle.cpp
-test/log.txt
-test/strace-log.txt
+test/
 compile_commands.json
-bundle-web.sh
-bundle.html
+.cache
+dependencies/
+mkapk-aarch64.deb
+config/target
+
+mkapk-aarch64/data/data/com.termux/files/usr/share/doc/mkapk/copyright
+
